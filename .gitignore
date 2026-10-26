@@ -21,6 +21,11 @@ encryption.key
 *.key
 id_rsa*
 id_ed25519*
+*-keys.tgz
+
+# Database dumps hold project secrets and task history
+*.dump
+*.sql.gz
 
 # Local runtime data
 .data/
