@@ -1,0 +1,20 @@
+.backlog-bar{display:flex;flex-wrap:wrap;gap:10px;margin:-14px 0 20px}
+.backlog-status{font-size:11px;color:var(--muted);background:#121a26;border:1px solid var(--line);border-radius:5px;padding:6px 10px}
+.backlog-status.busy{color:#b6c8ee;border-color:#33415e}.backlog-status.bad{color:#f1988d;border-color:#5a3434}
+.backlog-form{background:#121a26;border:1px solid var(--line);border-radius:9px;padding:14px;margin-bottom:28px}
+.backlog-form textarea{margin:0;min-height:70px;background:#0d121b}
+.backlog-form-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+.backlog-form-actions button{padding:8px 14px;font-size:12px}
+.backlog-section{margin-bottom:30px;max-width:900px}
+.backlog-section h2{font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.backlog-section .count{font:10px ui-monospace,monospace;color:var(--muted);background:#1c2533;padding:3px 6px;border-radius:4px}
+.backlog-item{display:flex;gap:12px;align-items:flex-start;background:#151d2a;border:1px solid #293347;border-radius:8px;padding:12px 14px;margin-bottom:8px}
+.backlog-item p{flex:1;min-width:0;color:#d4dbe7;font-size:13px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.backlog-meta{display:flex;align-items:center;gap:6px;flex-shrink:0}.backlog-meta small{font-size:10px}
+.backlog-empty{font-size:12px}
+.backlog-group{background:#111823;border:1px solid #293347;border-radius:8px;padding:6px;margin-bottom:10px}
+.backlog-task{width:100%;display:flex;align-items:center;gap:9px;background:none;color:#dde3ee;font-size:12px;font-weight:600;padding:8px;border-radius:6px;text-align:left;white-space:normal}
+button.backlog-task:hover{background:#1a2333;filter:none}.backlog-task span:nth-child(2){flex:1;min-width:0}.backlog-task small{flex-shrink:0;font-size:10px}
+.backlog-source{font-size:11px;line-height:1.5;padding:4px 8px 6px 23px;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:700px){.backlog-item{flex-direction:column;gap:6px}.backlog-meta{align-self:flex-end}}
+@media(max-width:700px){#backlog-view .page-title{flex-direction:column;align-items:stretch;gap:14px}#backlog-plan{width:100%}}

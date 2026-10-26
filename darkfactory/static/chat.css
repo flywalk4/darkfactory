@@ -1,0 +1,100 @@
+/* Fixed, discoverable conversation without changing existing page layout rules. */
+#shell { --df-chat-width: 340px; }
+#shell.chat-open > main { margin-right: var(--df-chat-width); }
+.df-chat[hidden], .df-chat-toggle[hidden], .df-chat-backdrop[hidden],
+.df-chat [hidden] { display: none !important; }
+.df-chat {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: var(--df-chat-width);
+  height: 100vh;
+  height: 100dvh;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: #111721;
+  border-left: 1px solid var(--line, #242d3c);
+  box-shadow: -14px 0 38px #00000016;
+}
+.df-chat-header {
+  min-height: 75px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 18px 18px 18px 20px;
+  border-bottom: 1px solid var(--line, #242d3c);
+}
+.df-chat-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.df-chat-heading h2 { font-size: 15px; letter-spacing: -.25px; }
+.df-chat-symbol { color: var(--accent, #a4e570); font-size: 22px; }
+.df-chat-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+  color: #9aa8bc;
+  font-size: 15px;
+}
+.df-chat-close:hover { background: #232d3d; color: #edf2fa; }
+.df-chat-context { margin: 0; padding: 15px 20px; color: #8796aa; font-size: 11px; }
+.df-chat-context select { margin-top: 7px; padding: 9px 10px; font-size: 12px; background: #0d131d; }
+.df-chat-conversations { display: flex; flex-shrink: 0; gap: 8px; padding: 0 20px 12px; }
+.df-chat-conversations select { min-width: 0; flex: 1; margin: 0; font-size: 11px; padding: 8px; }
+.df-chat-new { flex-shrink: 0; padding: 8px; font-size: 10px; background: #263340; color: #dce4f0; }
+.df-chat-stop { padding: 8px 10px; margin-bottom: 10px; border: 1px solid #754543; background: #301c21; color: #f3b1a7; font-size: 11px; }
+.df-chat-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 18px 18px; }
+.df-chat-empty { padding: 35px 4px; text-align: left; }
+.df-chat-empty-symbol { display: block; color: #71865f; font-size: 30px; margin-bottom: 16px; }
+.df-chat-empty h3 { color: #d9e3ef; font-size: 15px; margin-bottom: 10px; }
+.df-chat-empty p { color: #8291a6; font-size: 12px; line-height: 1.8; }
+.df-chat-messages { display: flex; flex-direction: column; gap: 13px; }
+.df-chat-message { min-width: 0; padding: 13px 14px; border: 1px solid #263143; border-radius: 10px; background: #161f2d; }
+.df-chat-user { margin-left: 18px; background: #a4e5700b; border-color: #a4e57025; }
+.df-chat-assistant { margin-right: 8px; }
+.df-chat-message-author { color: #a4e570; font-size: 10px; font-weight: 650; margin-bottom: 8px; }
+.df-chat-user .df-chat-message-author { color: #8e9db3; }
+.df-chat-message-content { color: #dce4f0; font-size: 12px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.df-chat-message-state { display: block; color: #91a67f; font-size: 10px; margin-top: 8px; }
+.df-chat-organization { margin-top: 12px; padding: 8px 10px; font-size: 11px; }
+.df-chat-composer { flex-shrink: 0; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line, #242d3c); background: #111721; }
+.df-chat-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.df-chat-preset { background: #1b2533; border: 1px solid #2c394c; color: #a8b8ce; padding: 6px 9px; border-radius: 20px; font-size: 10px; font-weight: 500; }
+.df-chat-preset:hover { border-color: #617b4c; color: #d6e9c3; }
+.df-chat-input { margin: 0; min-height: 82px; max-height: 160px; resize: none; font-size: 12px; line-height: 1.65; background: #0c121c; }
+.df-chat-input::placeholder { color: #6d7d94; }
+.df-chat-form-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; justify-content: space-between; }
+.df-chat-form-actions small { color: #75849a; font-size: 9px; white-space: normal; line-height: 1.5; max-width: 156px; }
+.df-chat-send { padding: 9px 12px; font-size: 11px; }
+.df-chat-secret-note { color: #748299; font-size: 10px; line-height: 1.6; margin-top: 11px; }
+.df-chat-status { color: #abc78f; font-size: 11px; line-height: 1.6; margin-bottom: 10px; }
+.df-chat-error { padding: 9px 10px; margin-bottom: 10px; border: 1px solid #754543; border-radius: 6px; color: #f3b1a7; background: #301c21; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.df-chat-toggle { position: fixed; right: 24px; bottom: 24px; z-index: 60; padding: 13px 17px; box-shadow: 0 8px 28px #0006; font-size: 12px; border: 1px solid #c6f49e; }
+.df-chat-working::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 8px; vertical-align: middle; border-radius: 50%; background: #2b4c1e; }
+.df-chat-backdrop { display: none; }
+.df-chat button:focus-visible, .df-chat-toggle:focus-visible { outline: 2px solid var(--accent, #a4e570); outline-offset: 3px; }
+@media (max-width: 980px) {
+  #shell.chat-open > main { margin-right: 0; }
+  .df-chat { width: min(380px, 100vw); box-shadow: -18px 0 60px #0008; }
+  .df-chat-backdrop { display: block; position: fixed; inset: 0; z-index: 65; background: #03070db8; border: 0; border-radius: 0; padding: 0; }
+  .df-chat-toggle { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+@media (max-height: 650px) {
+  .df-chat-header { min-height: 58px; padding-top: 10px; padding-bottom: 10px; }
+  .df-chat-context { padding-top: 10px; padding-bottom: 10px; }
+  .df-chat-composer { padding-top: 10px; }
+  .df-chat-input { min-height: 65px; }
+  .df-chat-secret-note { display: none; }
+}
+.df-chat-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.df-chat-attachments[hidden] { display: none; }
+.df-chat-attachment { position: relative; width: 56px; height: 56px; border: 1px solid #2c3a4f; border-radius: 6px; overflow: hidden; background: #0c121c; }
+.df-chat-attachment img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.df-chat-attachment-remove { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border-radius: 50%; font-size: 12px; line-height: 1; background: rgba(12, 18, 28, .85); color: #f3b1a7; }
+.df-chat-attach { padding: 7px 9px; font-size: 13px; background: transparent; border: 1px solid #2c3a4f; }
+.df-chat-message-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.df-chat-message-images img { max-width: 160px; max-height: 120px; border-radius: 6px; border: 1px solid #2c3a4f; display: block; }

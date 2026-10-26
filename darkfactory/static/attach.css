@@ -1,0 +1,16 @@
+.attach-zone { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 16px; padding: 12px; border: 1px dashed #344055; border-radius: 8px; }
+.attach-label { font-size: 13px; color: #c9d5e6; }
+.attach-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.attach-list:empty { display: none; }
+.attach-item { position: relative; display: flex; align-items: center; gap: 8px; max-width: 240px; padding: 6px 28px 6px 6px; border: 1px solid #2c3a4f; border-radius: 6px; background: #0c121c; font-size: 12px; }
+.attach-item img, .attach-item i { flex-shrink: 0; width: 40px; height: 40px; object-fit: cover; border-radius: 4px; display: grid; place-items: center; font-style: normal; font-size: 20px; }
+.attach-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-item small { display: block; color: var(--muted, #8a98ad); font-size: 11px; }
+.attach-item button { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 13px; line-height: 1; background: #1b2433; color: #f3b1a7; }
+.attach-button { align-self: flex-start; margin: 0; cursor: pointer; font-size: 12px; padding: 7px 12px; border: 1px solid #344055; border-radius: 6px; color: #dce6f3; }
+.attach-button:hover { border-color: var(--accent, #a4e570); }
+.attach-zone small { color: var(--muted, #8a98ad); font-size: 11px; }
+.attach-error { margin: 0; color: #f3b1a7; font-size: 12px; }
+.attach-error:empty { display: none; }
+.detail-attachments { align-items: center; flex-wrap: wrap; }
+.detail-attachments > span { font-size: 12px; color: var(--muted, #8a98ad); }

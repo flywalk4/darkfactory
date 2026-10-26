@@ -1,0 +1,144 @@
+name: darkfactory
+x-control: &control
+  image: darkfactory-control:local
+  build:
+    context: .
+    target: control
+  environment: &environment
+    DATABASE_URL: postgresql+psycopg://darkfactory:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db/darkfactory
+    DATA_ROOT: /data
+    DATA_VOLUME: ${DATA_VOLUME:-darkfactory_data}
+    EXECUTOR_IMAGE: darkfactory-executor:local
+    DARKFACTORY_ADMIN_TOKEN: ${DARKFACTORY_ADMIN_TOKEN:-}
+    DARKFACTORY_PERSONAL_MODE: ${DARKFACTORY_PERSONAL_MODE:-0}
+    DARKFACTORY_PUBLIC_URL: ${DARKFACTORY_PUBLIC_URL:-http://127.0.0.1:8080}
+  volumes:
+    - data:/data
+    - repos:/repos
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: darkfactory
+      POSTGRES_DB: darkfactory
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U darkfactory"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks: [control]
+  app:
+    <<: *control
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8000"
+    networks: [control]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+  worker:
+    <<: *control
+    command: [python, -m, darkfactory.worker]
+    # Let running agent steps finish on redeploy (worker drains for DARKFACTORY_DRAIN_SECONDS).
+    stop_grace_period: 16m
+    environment:
+      <<: *environment
+      GLOBAL_CONCURRENCY: ${GLOBAL_CONCURRENCY:-4}
+      DARKFACTORY_EXECUTOR_CPUS: ${EXECUTOR_CPUS:-4}
+      # Caching mirrors of public registries; set empty to install straight from upstream.
+      DARKFACTORY_NPM_MIRROR: ${NPM_MIRROR-http://npm-cache:4873/}
+      DARKFACTORY_PYPI_MIRROR: ${PYPI_MIRROR-http://pypi-cache:5000/index/}
+      PREPROD_CHECK_INTERVAL: ${PREPROD_CHECK_INTERVAL:-300}
+    volumes:
+      - data:/data
+      - repos:/repos
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control]
+    depends_on:
+      db:
+        condition: service_healthy
+      executor-image:
+        condition: service_completed_successfully
+      executor-tools-image:
+        condition: service_completed_successfully
+  backup:
+    image: postgres:16-alpine
+    # Daily pg_dump into the data volume; BACKUP_KEEP newest dumps are kept.
+    environment:
+      PGHOST: db
+      PGUSER: darkfactory
+      PGDATABASE: darkfactory
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /data/backups
+        while true; do
+          file=/data/backups/darkfactory-$$(date +%Y%m%d-%H%M%S).dump
+          if pg_dump -Fc -f "$$file.tmp"; then mv "$$file.tmp" "$$file"; echo "backup $$file"; else rm -f "$$file.tmp"; echo "backup failed"; fi
+          ls -1t /data/backups/darkfactory-*.dump | tail -n +$$((BACKUP_KEEP + 1)) | xargs -r rm -f
+          sleep "$$BACKUP_INTERVAL"
+        done
+    volumes:
+      - data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [control]
+  npm-cache:
+    image: verdaccio/verdaccio:6
+    volumes:
+      - npm-cache:/verdaccio/storage
+    restart: unless-stopped
+    networks: [control]
+  pypi-cache:
+    image: epicwink/proxpi:latest
+    environment:
+      PROXPI_CACHE_DIR: /cache
+      PROXPI_CACHE_SIZE: ${PYPI_CACHE_BYTES:-10000000000}
+    volumes:
+      - pypi-cache:/cache
+    restart: unless-stopped
+    networks: [control]
+  executor-image:
+    image: darkfactory-executor:local
+    build:
+      context: .
+      target: executor
+    entrypoint: [python, -c, "print('Executor image ready')"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+  executor-tools-image:
+    # The executor without the factory code: project toolchains build on it and survive factory deploys.
+    image: darkfactory-executor-tools:local
+    build:
+      context: .
+      target: executor-tools
+    entrypoint: [python, -c, "print('Executor tools image ready')"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+volumes:
+  data:
+    name: ${DATA_VOLUME:-darkfactory_data}
+  postgres:
+  repos:
+  npm-cache:
+  pypi-cache:
+networks:
+  control:
+    internal: false

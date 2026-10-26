@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Darkfactory</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css?v=20261028-factory">
+  <link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/chat.css?v=20261022-images">
+  <link rel="stylesheet" href="/static/registry.css"><link rel="stylesheet" href="/static/backlog.css?v=20261025-disk2"><link rel="stylesheet" href="/static/transcript.css?v=20261026-diff2"><link rel="stylesheet" href="/static/attach.css?v=20261022-attach">
+</head>
+<body>
+<div id="login" class="login">
+  <div class="login-card"><span class="logo">DF<span>●</span></span><h1>Darkfactory</h1>
+    <p>Твоя команда разработки. Свои проекты. Своя инфраструктура.</p>
+    <form id="login-form"><label>Токен доступа<input id="token" type="password" required autocomplete="current-password" placeholder="Вставь токен владельца"></label>
+      <button>Войти →</button></form>
+    <p class="muted small">Первый токен: <code>DARKFACTORY_ADMIN_TOKEN</code> из <code>.env</code> или <code>docker compose exec app cat /data/bootstrap-token</code></p>
+  </div>
+</div>
+<div id="shell" hidden>
+  <aside><div class="aside-top"><a class="brand" href="/">DF<span>●</span> <strong>Darkfactory</strong></a><button id="collapse-nav" class="quiet" title="Свернуть меню" aria-label="Свернуть меню" aria-expanded="true">«</button></div>
+    <div class="workspace"><span class="avatar">■</span><div><strong id="org-name">Компания</strong><small id="who"></small></div></div>
+    <div class="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+    <nav class="workspace-nav" aria-label="Рабочее пространство">
+    <button class="nav active" data-view="board"><span class="nav-icon">▦</span><span class="nav-text">Задачи</span></button>
+    <button class="nav" data-view="factory"><span class="nav-icon">◷</span><span class="nav-text">Фабрика</span></button>
+    <button class="nav" data-view="backlog"><span class="nav-icon">☰</span><span class="nav-text">Бэклог</span></button>
+    <button class="nav" data-view="artifacts"><span class="nav-icon">▤</span><span class="nav-text">Артефакты проекта</span></button>
+    <button class="nav" data-view="agents"><span class="nav-icon">◈</span><span class="nav-text">Агенты, скиллы и MCP</span></button>
+    <button class="nav" data-view="settings"><span class="nav-icon">⚙</span><span class="nav-text">Подключения и проекты</span></button>
+    </nav>
+    <div class="nav-label projects-title">ПРОЕКТЫ <button id="add-project" title="Добавить проект">+</button></div>
+    <div id="project-list"></div>
+    <footer><span class="dot"></span> Своя инфраструктура <button id="logout" class="quiet">Выйти</button></footer>
+  </aside>
+  <main>
+    <header><div class="breadcrumbs">Рабочее пространство <span>/</span> <b id="current-project">Проекты</b></div><span class="private">◉ PRIVATE</span></header>
+    <section id="board-view">
+      <div class="page-title"><div><div class="eyebrow">РАЗРАБОТКА БЕЗ РУТИНЫ</div><h1 id="project-heading">Выбери проект</h1><p id="project-description">Задачи, проверки и изменения — в одном месте.</p></div><div><button id="new-incident" class="secondary">Сообщить о поломке</button> <button id="new-task">+ Новая задача</button></div></div>
+      <div class="metrics" id="metrics"></div>
+      <div id="disk-warning" class="disk-warning" hidden></div>
+      <div id="attention" class="main-pending attention" hidden></div>
+      <div id="main-pending" class="main-pending" hidden></div>
+      <div class="board-heading"><h2>Все задачи <span id="task-count">0</span></h2><div class="legend"><span class="dot"></span> Обновляется автоматически</div></div>
+      <div id="empty" class="empty" hidden><div class="empty-symbol">↗</div><h2>Начни с проекта</h2><p>Подключи Git-репозиторий и пул исполнителей.<br>Потом поставь первую задачу.</p><button id="empty-add">Подключить проект</button></div>
+      <div id="board" class="board"></div>
+    </section>
+    <section id="agents-view" hidden><div id="agent-workspace"></div></section>
+    <section id="factory-view" hidden><div id="factory-workspace"></div></section>
+    <section id="backlog-view" hidden><div id="backlog-workspace"></div></section>
+    <section id="artifacts-view" hidden><div id="artifact-workspace"></div></section>
+    <section id="settings-view" hidden>
+      <div class="page-title"><div><div class="eyebrow">ИНФРАСТРУКТУРА</div><h1>Подключения и проекты</h1><p>Репозитории, пулы и доступы твоей компании.</p></div></div>
+      <div class="settings-grid"><section class="panel"><div class="panel-title"><h2>Пулы исполнителей</h2><button id="add-pool">+ Пул</button></div><div id="pools"></div></section>
+      <section class="panel"><div class="panel-title"><h2>Подключения</h2><div><button id="connect-subscription">+ Подписка</button> <button id="add-connection" class="secondary">Реквизиты / API</button></div></div><div id="subscription-sessions"></div><div id="connections"></div></section>
+      <section class="panel"><div class="panel-title"><h2>Уведомления человеку</h2></div><div id="notification-channels"></div></section>
+      <section class="panel"><div class="panel-title"><h2>Доступ к команде</h2><button id="add-member">+ Участник</button></div><div id="members"></div></section>
+      <section class="panel"><h2>Правила фабрики</h2><p>Автослияние только в <code>preprod</code>, после обязательных проверок и отдельного ревью.</p><p>Без проверок — только запись изменений. Перенос в основную ветку и production выполняет человек.</p><p>Платный API требует бюджета и явного назначения роли либо включённой владельцем политики перехода.</p><a href="/docs" target="_blank" rel="noopener">Документация API ↗</a><p><button id="add-organization" class="secondary">Новая организация</button></p><div id="tokens"></div></section></div>
+    </section>
+  </main>
+</div>
+<dialog id="modal"><form id="modal-form"><div class="dialog-heading"><h2 id="modal-title"></h2><button type="button" id="close-modal" class="quiet">✕</button></div><div id="modal-fields"></div><div id="form-error" class="error"></div><div class="dialog-actions"><button type="button" id="cancel-modal" class="secondary">Отмена</button><button id="submit-modal">Сохранить</button></div></form></dialog>
+<dialog id="detail"><div class="dialog-heading"><h2 id="detail-title"></h2><button id="close-detail" class="quiet">✕</button></div><div id="detail-body"></div></dialog>
+<div id="toast" role="status" hidden></div>
+<script src="/static/attach.js?v=20261022-attach" defer></script>
+<script src="/static/app.js?v=20261028-factory" defer></script>
+<script src="/static/backlog.js?v=20261025-disk" defer></script>
+<script src="/static/registry.js?v=20261027-poll" defer></script>
+<script src="/static/promotions.js?v=20261028-included" defer></script>
+<script src="/static/factory.js?v=20261028-factory" defer></script>
+<script src="/static/taskview.js?v=20261028-ui" defer></script>
+<script src="/static/review.js?v=20261028-mute" defer></script>
+<script src="/static/agents.js?v=20261028-prompt" defer></script>
+<script src="/static/onboarding.js?v=20261027-poll" defer></script>
+<script src="/static/notifications.js?v=20261028-director" defer></script>
+<script src="/static/chat.js?v=20261028-director" defer></script>
+<script src="/static/transcript.js?v=20261028-director" defer></script>
+</body></html>

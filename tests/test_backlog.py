@@ -1,0 +1,125 @@
+import json
+
+from conftest import connect
+from sqlalchemy import select
+
+from darkfactory import backlog, db
+
+
+class Groups:
+    def __init__(self, make):
+        self.make = make
+        self.calls = []
+
+    def run(
+        self, task, project, connection, role, heartbeat, timeout, *, prompt_override=None, output_schema=None
+    ):
+        self.calls.append((role, prompt_override, output_schema))
+        return {"status": "ok", "text": json.dumps(self.make(prompt_override))}
+
+
+def add(client, project, text):
+    response = client.post(f"/api/projects/{project['id']}/backlog", json={"text": text})
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def test_click_groups_related_notes_into_tasks(client, setup_project):
+    project, pool = setup_project
+    connect(client, pool)
+    first = add(client, project, "Кнопка экспорта не видна на мобильном")
+    second = add(client, project, "Экспорт CSV теряет кириллицу")
+    third = add(client, project, "Опечатка в футере")
+    assert client.get(f"/api/projects/{project['id']}/backlog").json()["next_at"]
+    assert not backlog.plan(Groups(lambda _: {"groups": []}))  # Timer not due yet, nothing requested.
+
+    view = client.post(f"/api/projects/{project['id']}/backlog/plan").json()
+    assert view["requested"] and view["next_at"] is None
+    executor = Groups(
+        lambda _: {
+            "groups": [
+                {
+                    "title": "Починить экспорт",
+                    "request": "Кнопка и кодировка",
+                    "items": [first, second, "unknown"],
+                },
+                {"title": "Дубль", "request": "x", "items": [first]},
+            ]
+        }
+    )
+    assert backlog.plan(executor)
+    role, prompt, schema = executor.calls[0]
+    assert role == "director" and schema == backlog.SCHEMA
+    assert first in prompt and "Опечатка в футере" in prompt
+    view = client.get(f"/api/projects/{project['id']}/backlog").json()
+    tasks = {item["id"]: item["task"] for item in view["items"]}
+    assert tasks[first]["id"] == tasks[second]["id"]
+    assert tasks[first]["title"] == "Починить экспорт"
+    # Skipped by the agent: recorded as dismissed, not turned into a task of its own.
+    assert tasks[third] is None
+    assert {item["id"]: item["state"] for item in view["items"]}[third] == "dismissed"
+    assert view["requested"] is None and view["last_tasks"] == 1
+    with db.Session() as session:
+        assert session.scalar(select(db.Task).where(db.Task.id == tasks[first]["id"])).state == "queued"
+    assert client.delete(f"/api/projects/{project['id']}/backlog/{first}").status_code == 409
+    assert client.post(f"/api/projects/{project['id']}/backlog/plan").status_code == 409
+
+
+def test_timer_plans_after_interval_and_failure_keeps_notes(client, setup_project, monkeypatch):
+    project, pool = setup_project
+    connect(client, pool)
+    note = add(client, project, "Добавить сортировку")
+    later = backlog.now() + 4 * 3600 + 1
+    monkeypatch.setattr(backlog, "now", lambda: later)
+    assert backlog.plan(Groups(lambda _: {"groups": "broken"}))
+    view = client.get(f"/api/projects/{project['id']}/backlog").json()
+    assert view["items"][0]["state"] == "open" and view["last_error"]
+    assert not backlog.plan(Groups(lambda _: {"groups": []}))  # Waits a full interval after the failure.
+    monkeypatch.setattr(backlog, "now", lambda: later + 4 * 3600)
+    assert backlog.plan(
+        Groups(lambda _: {"groups": [{"title": "Сортировка", "request": "r", "items": [note]}]})
+    )
+    assert client.get(f"/api/projects/{project['id']}/backlog").json()["items"][0]["state"] == "planned"
+
+
+def test_manual_only_project_and_deleting_open_notes(client, setup_project, monkeypatch):
+    project, pool = setup_project
+    connect(client, pool)
+    response = client.put(f"/api/projects/{project['id']}", json={**project, "backlog_hours": 0})
+    assert response.status_code == 200, response.text
+    assert response.json()["backlog_hours"] == 0
+    note = add(client, project, "Когда-нибудь")
+    monkeypatch.setattr(backlog, "now", lambda: 10**10)
+    assert not backlog.plan(Groups(lambda _: {"groups": []}))
+    assert client.get(f"/api/projects/{project['id']}/backlog").json()["next_at"] is None
+    assert client.delete(f"/api/projects/{project['id']}/backlog/{note}").json() == {"deleted": True}
+    assert client.get(f"/api/projects/{project['id']}/backlog").json()["items"] == []
+
+
+def test_later_notes_stay_on_the_task_instead_of_the_backlog(client, setup_project):
+    from darkfactory import worker
+
+    project, _ = setup_project
+    with db.transaction() as session:
+        owner = db.Task(
+            id=db.uid(),
+            org_id=project["org_id"],
+            project_id=project["id"],
+            title="Owner",
+            request="r",
+            branch="b",
+        )
+        session.add(owner)
+        session.flush()
+        worker.later_notes(
+            session,
+            owner,
+            ["[LATER] Чеклист ревью: no_unrelated_changes", "[LATER] Реальное улучшение", "не заметка"],
+            "разработка",
+        )
+        session.flush()
+        assert session.query(backlog.BacklogItem).filter_by(project_id=project["id"]).count() == 0
+        notes = session.scalar(
+            select(db.Event).where(db.Event.task_id == owner.id, db.Event.kind == "later_notes")
+        )
+        assert notes.data["items"] == ["Реальное улучшение"]
