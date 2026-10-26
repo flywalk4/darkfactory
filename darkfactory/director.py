@@ -215,6 +215,63 @@ def load_files(dialogue_id):
     ]
 
 
+# Paths whose body can carry task attachments, and the field each one reads them from.
+ATTACHMENT_PATHS = {
+    r"/api/projects/[a-z0-9]+/tasks": "attachments",
+    r"/api/tasks/[a-z0-9]+/actions": "attachments",
+    r"/api/tasks/[a-z0-9]+/attachments": "files",
+}
+
+
+def chat_attachments(dialogue_id):
+    """Images and files of this message and the earlier messages of its chat, as task attachments."""
+    with Session() as db:
+        row = db.get(Dialogue, dialogue_id)
+        rows = [row]
+        if row.thread_id:
+            rows = db.scalars(
+                select(Dialogue)
+                .where(Dialogue.thread_id == row.thread_id, Dialogue.token_id == row.token_id)
+                .where(Dialogue.created <= row.created)
+                .order_by(Dialogue.created)
+            ).all()
+        identifiers = [item.id for item in rows]
+    result = []
+    for identifier in identifiers:
+        for path, media_type in image_files(identifier):
+            result.append(
+                {
+                    "name": f"chat-image-{len(result) + 1}{path.suffix}",
+                    "media_type": media_type,
+                    "data": base64.b64encode(path.read_bytes()).decode(),
+                }
+            )
+        for path in text_files(identifier):
+            media_type = next(kind for kind, suffix in TEXT_TYPES.items() if suffix == path.suffix)
+            result.append(
+                {
+                    "name": path.name[3:],
+                    "media_type": media_type,
+                    "data": base64.b64encode(path.read_bytes()).decode(),
+                }
+            )
+    return result
+
+
+def attach_chat_files(dialogue_id, path, body):
+    """Replace "chat_attachments": true with the chat's files: the model never holds their bytes."""
+    if not isinstance(body, dict) or not body.pop("chat_attachments", False):
+        return body
+    field = next((field for pattern, field in ATTACHMENT_PATHS.items() if re.fullmatch(pattern, path)), None)
+    if not field:
+        raise ValueError("chat_attachments принимают только создание задачи, actions и attachments")
+    files = chat_attachments(dialogue_id)
+    if not files:
+        raise ValueError("В этом чате нет приложенных картинок или файлов")
+    body[field] = [*(body.get(field) or []), *files]
+    return body
+
+
 def scrub(value):
     if isinstance(value, dict):
         return {key: scrub(item) for key, item in value.items() if key not in FORBIDDEN_KEYS}
@@ -266,7 +323,7 @@ def validate_action(action):
         raise ValueError("Эта операция требует формы доступа")
     allowed = {
         "GET": r"/(me|executors|projects|pools|connections|members|notification-events|notification-channels|notification-deliveries|login-sessions|projects/[a-z0-9]+/(agents|agent-catalog|tasks|director-journal|backlog|metrics)|tasks/[a-z0-9]+|login-sessions/[a-z0-9]+)",
-        "POST": r"/(projects|pools|notification-channels|login-sessions|projects/[a-z0-9]+/(tasks|incidents|main-sync)|tasks/[a-z0-9]+/(actions|links)|login-sessions/[a-z0-9]+/cancel)",
+        "POST": r"/(projects|pools|notification-channels|login-sessions|projects/[a-z0-9]+/(tasks|incidents|main-sync)|tasks/[a-z0-9]+/(actions|links|hint|attachments)|login-sessions/[a-z0-9]+/cancel)",
         "PUT": r"/(organization|projects/[a-z0-9]+|projects/[a-z0-9]+/agents|tasks/[a-z0-9]+/priority|pools/[a-z0-9]+|notification-channels/[a-z0-9]+)",
         "DELETE": r"/(pools/[a-z0-9]+|tasks/[a-z0-9]+/links/[a-z0-9]+)",
     }
@@ -456,6 +513,11 @@ def prompt(state):
         '{"action":"resume","message":"<его указание>"} или отмени по его слову. '
         "Подтянуть свежий main в preprod (хотфиксы, коммиты владельца): POST projects/{id}/main-sync с телом {}; "
         "state merged — влито, up_to_date — уже актуально, conflict — создана задача на разрешение (task_id). "
+        'Картинки и файлы этого чата приложи к задаче полем "chat_attachments":true в теле POST '
+        "projects/{id}/tasks, tasks/{id}/actions (resume) или tasks/{id}/attachments — фабрика подставит их сама; "
+        "не перепечатывай содержимое и не пиши base64. Дополнить задачу в работе (state running): POST "
+        'tasks/{id}/hint {"text":"..."} — агент прочтёт по ходу; новые файлы — tasks/{id}/attachments, они сразу '
+        "видны агенту. Остановленную задачу дополняй через resume с message. "
         "Не меняй лимиты, права, платный API или состояние задач без прямого поручения. Никаких production-деплоев "
         "или merge в main. Если запрос неоднозначен, задай один вопрос и верни actions:[]. "
         "Без подходящей модели или доступа объясни ограничение. В конце сообщи фактические результаты.\n"
@@ -600,6 +662,8 @@ def advance_dialogues(executor=None):
             if files := load_files(identifier):
                 # Owner-supplied data, not instructions: the prompt treats the whole state as context.
                 state["attached_files"] = files
+            if chat_attachments(identifier):
+                state["chat_has_attachments"] = True
             receipts = []
             deadline = time.monotonic() + 480
             for _ in range(6):
@@ -656,7 +720,7 @@ def advance_dialogues(executor=None):
                     if not heartbeat(identifier, owner):
                         raise RuntimeError("Доступ или аренда сеанса изменились")
                     try:
-                        body = validate_action(action)
+                        body = attach_chat_files(identifier, action.path, validate_action(action))
                     except ValueError as exc:
                         # A refused action is the model's to correct on the next round, not the end of
                         # the conversation.

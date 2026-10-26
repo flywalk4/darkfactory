@@ -533,6 +533,53 @@ def test_director_receives_text_and_json_files(client, setup_project):
     assert message["content"] == "(см. файл)"
 
 
+def test_director_attaches_chat_files_to_tasks_and_adds_to_running_ones(client, setup_project):
+    import base64
+
+    from darkfactory import attachments
+
+    project, pool = setup_project
+    connect(client, pool)
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\nscreenshot").decode()
+    spec = base64.b64encode("Шаги воспроизведения".encode()).decode()
+    response = client.post(
+        "/api/config-chat",
+        json={
+            "message": "Заведи задачу по ошибке",
+            "project_id": project["id"],
+            "images": [{"media_type": "image/png", "data": png}],
+            "files": [{"name": "steps.txt", "media_type": "text/plain", "data": spec}],
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = {"title": "Ошибка", "request": "Исправить ошибку", "chat_attachments": True}
+    model = Model(
+        {"reply": "Создаю", "actions": [action("POST", f"/api/projects/{project['id']}/tasks", body)]},
+        {"reply": "Готово", "actions": []},
+    )
+    director.advance_dialogues(model)
+    assert "chat_attachments" in model.prompts[0] and '"chat_has_attachments": true' in model.prompts[0]
+    task = next(
+        t for t in client.get(f"/api/projects/{project['id']}/tasks").json() if t["title"] == "Ошибка"
+    )
+    stored = {item["name"]: item["size"] for item in attachments.listing(task["id"])}
+    assert stored == {
+        "01-chat-image-1.png": len(base64.b64decode(png)),
+        "02-steps.txt": len(base64.b64decode(spec)),
+    }
+    receipts = client.get(f"/api/config-chat?project_id={project['id']}").json()["messages"][-1]["actions"]
+    assert receipts[0]["status"] == 201
+
+    for path in (f"/api/tasks/{task['id']}/hint", f"/api/tasks/{task['id']}/attachments"):
+        director.validate_action(director.Action(**action("POST", path, {"text": "x"})))
+    try:
+        director.attach_chat_files("missing", f"/api/tasks/{task['id']}/hint", {"chat_attachments": True})
+    except ValueError as exc:
+        assert "chat_attachments" in str(exc)
+    else:
+        raise AssertionError("hint must not take chat attachments")
+
+
 def test_director_cannot_change_roles_commands_or_destinations(client, setup_project):
     project, _ = setup_project
     for method, path in [
