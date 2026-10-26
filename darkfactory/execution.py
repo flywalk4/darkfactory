@@ -1009,7 +1009,10 @@ class DockerExecutor:
                 cap_add=RUNNER_CAPABILITIES,
                 security_opt=["no-new-privileges:true"],
                 # A dev server, a browser and a dotnet/git test run together exceed 256 processes.
-                pids_limit=int(os.getenv("DARKFACTORY_EXECUTOR_PIDS", "1024")),
+                # An agent's long run leaves background shells, servers and test processes behind; at 1024 the
+                # kernel refused forks mid-run ("fork rejected by pids controller") and the agent died with a
+                # broken pipe. Memory stays capped by mem_limit.
+                pids_limit=int(os.getenv("DARKFACTORY_EXECUTOR_PIDS", "4096")),
                 mem_limit=os.getenv("DARKFACTORY_EXECUTOR_MEMORY", "4g"),
                 nano_cpus=int(float(os.getenv("DARKFACTORY_EXECUTOR_CPUS", "2")) * 1_000_000_000),
                 **({"network": network.name} if services else {"network_mode": "none"}),
