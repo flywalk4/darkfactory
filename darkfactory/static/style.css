@@ -59,12 +59,13 @@
 @media(max-width:760px){.detail-grid{grid-template-columns:1fr;gap:0}.detail-facts{margin-top:14px}.toolbar-gap{display:none}.relation-id{display:none}}
 .muted.small,.small.muted{font-size:12px}
 aside,main{transition:width .18s ease,margin-left .18s ease}
+aside{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#2a3446 transparent}aside>*{flex-shrink:0}
 .aside-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
 #collapse-nav{padding:4px 8px;font-size:15px;color:#6f7d94;border-radius:6px}#collapse-nav:hover{color:#dde3ee;background:#1b2433;filter:none}
 .nav{display:flex;align-items:center;gap:12px}.nav-icon{width:16px;text-align:center;flex-shrink:0}
 .nav-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .project-icon{flex-shrink:0;display:grid;place-items:center;width:20px;height:20px;border-radius:5px;background:#1f2a3c;font-weight:700}
-body.nav-collapsed aside{width:68px;padding:22px 10px;overflow:hidden}
+body.nav-collapsed aside{width:68px;padding:22px 10px;overflow-x:hidden}
 body.nav-collapsed main{margin-left:68px}
 body.nav-collapsed .aside-top{flex-direction:column;gap:14px}
 body.nav-collapsed .brand strong,body.nav-collapsed .brand span,body.nav-collapsed .workspace,body.nav-collapsed .nav-label,body.nav-collapsed .nav-text,body.nav-collapsed footer>:not(#logout){display:none}
