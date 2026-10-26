@@ -261,6 +261,14 @@ function deletePool(pool) {
   $('#submit-modal').textContent=tr('Удалить пул');
   $('#submit-modal').disabled=linked.length>0;
 }
+function deleteProject(project) {
+  modal(tr('Удалить проект «{name}»?',{name:project.name}),`<p>${tr('Удалятся задачи проекта, их история, артефакты, бэклог, чаты с Директором и каналы уведомлений проекта. Репозиторий и его ветки останутся. Отменить нельзя.')}</p>`+field('confirm_name',tr('Введи название проекта для подтверждения')),async values=>{
+    if(values.confirm_name.trim()!==project.name) throw new Error(tr('Название не совпадает'));
+    await api('/projects/'+project.id,'DELETE');
+    toast(tr('Проект удалён'));
+  });
+  $('#submit-modal').textContent=tr('Удалить проект');
+}
 const credentialsPlaceholder='Claude: {"oauth_token":"…"}\nCodex: {"auth_method":"siwc","accessToken":"…"}\nAPI: {"api_key":"…","base_url":"https://…/v1","input_usd_per_million":0,"output_usd_per_million":0}';
 function connectionForm(connection) {
   const creating=!connection;
@@ -333,12 +341,13 @@ async function settings() {
     $('#connections').innerHTML='<p>'+tr('Подключениями управляет владелец организации.')+'</p>';
     $('#members').innerHTML='<p>'+tr('Доступом участников управляет владелец.')+'</p>';
   }
-  $('#pools').innerHTML=poolRows+projects.map(p=>`<div class="setting-row"><strong>${esc(p.name)}</strong><small>${esc(p.remote)}</small>${environmentLine(p)}<small class="project-health">preprod: ${esc(p.incident_id?tr('идёт исправление'):({healthy:tr('проверена'),broken:tr('проверки не прошли')}[p.health?.state]||tr('ожидает проверки')))}</small>${owner?`<div class="setting-actions"><button class="quiet" data-agents="${p.id}">${tr('Роли, скиллы и MCP')}</button><button class="quiet" data-environment="${p.id}">${tr('Подготовить окружение')}</button><button class="quiet" data-edit="${p.id}">${tr('Настроить проект →')}</button></div>`:''}</div>`).join('');
+  $('#pools').innerHTML=poolRows+projects.map(p=>`<div class="setting-row"><strong>${esc(p.name)}</strong><small>${esc(p.remote)}</small>${environmentLine(p)}<small class="project-health">preprod: ${esc(p.incident_id?tr('идёт исправление'):({healthy:tr('проверена'),broken:tr('проверки не прошли')}[p.health?.state]||tr('ожидает проверки')))}</small>${owner?`<div class="setting-actions"><button class="quiet" data-agents="${p.id}">${tr('Роли, скиллы и MCP')}</button><button class="quiet" data-environment="${p.id}">${tr('Подготовить окружение')}</button><button class="quiet" data-edit="${p.id}">${tr('Настроить проект →')}</button>${orgOwner?`<button class="quiet" data-delete-project="${p.id}">${tr('Удалить проект')}</button>`:''}</div>`:''}</div>`).join('');
   if($('#edit-organization')) $('#edit-organization').onclick=organizationForm;
   document.querySelectorAll('[data-edit-pool]').forEach(b=>b.onclick=()=>poolForm(poolList.find(p=>p.id===b.dataset.editPool)));
   document.querySelectorAll('[data-delete-pool]').forEach(b=>b.onclick=()=>deletePool(poolList.find(p=>p.id===b.dataset.deletePool)));
   document.querySelectorAll('[data-agents]').forEach(b=>b.onclick=()=>agentSettings(projects.find(p=>p.id===b.dataset.agents)).catch(e=>toast(e.message)));
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>projectForm(projects.find(p=>p.id===b.dataset.edit)));
+  document.querySelectorAll('[data-delete-project]').forEach(b=>b.onclick=()=>deleteProject(projects.find(p=>p.id===b.dataset.deleteProject)));
   document.querySelectorAll('[data-environment]').forEach(b=>b.onclick=async()=>{const task=await api('/projects/'+b.dataset.environment+'/environment','POST');toast(tr('Агент готовит окружение: {title}',{title:task.title}));});
   await Promise.all([tokenSettings(),subscriptionSettings(),notificationSettings()]);
 }

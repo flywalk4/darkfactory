@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 import socket
 import threading
 from pathlib import Path
@@ -9,7 +10,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from .. import (
     agents,
@@ -20,7 +21,13 @@ from .. import (
     toolchains,
 )
 from ..db import (
+    ROOT,
+    Artifact,
+    ArtifactInput,
+    ArtifactVersion,
     Connection,
+    Event,
+    Link,
     Organization,
     Pool,
     Principal,
@@ -323,6 +330,72 @@ def update_project(project_id: str, value: ProjectInput, a=Depends(access)):
             setattr(project, key, item)
         project.secret = project_secrets(value, project.secret)
         return public(project)
+
+
+@router.delete("/api/projects/{project_id}")
+def delete_project(project_id: str, a=Depends(access)):
+    """Remove the project with its tasks, history, artifacts, backlog, chats and channels; the repository stays."""
+    from ..backlog import BacklogItem
+    from ..director import ChatThread, Dialogue
+    from ..notifications import NotificationChannel, NotificationDelivery
+
+    a.organization_owner()
+    with transaction() as db:
+        project = a.project(db, project_id)
+        if db.scalar(
+            select(Task).where(Task.project_id == project_id, Task.state.in_(["running", "recovering"]))
+        ):
+            raise HTTPException(409, "Останови активные задачи перед удалением проекта")
+        tasks = select(Task.id).where(Task.project_id == project_id)
+        task_ids = list(db.scalars(tasks))
+        artifacts = select(Artifact.id).where(Artifact.project_id == project_id)
+        channels = select(NotificationChannel.id).where(NotificationChannel.project_id == project_id)
+        threads = select(ChatThread.id).where(ChatThread.project_id == project_id)
+        events = select(Event.id).where(Event.task_id.in_(tasks))
+        db.execute(
+            delete(NotificationDelivery).where(
+                NotificationDelivery.task_id.in_(tasks)
+                | NotificationDelivery.event_id.in_(events)
+                | NotificationDelivery.channel_id.in_(channels)
+            )
+        )
+        db.execute(delete(NotificationChannel).where(NotificationChannel.id.in_(channels)))
+        db.execute(
+            delete(Dialogue).where((Dialogue.project_id == project_id) | Dialogue.thread_id.in_(threads))
+        )
+        db.execute(delete(ChatThread).where(ChatThread.project_id == project_id))
+        db.execute(delete(BacklogItem).where(BacklogItem.project_id == project_id))
+        db.execute(
+            delete(ArtifactInput).where(
+                ArtifactInput.task_id.in_(tasks) | ArtifactInput.artifact_id.in_(artifacts)
+            )
+        )
+        # Another project's artifact keeps its version; it only forgets the task that wrote it.
+        db.execute(
+            update(ArtifactVersion)
+            .where(ArtifactVersion.source_task_id.in_(tasks), ArtifactVersion.artifact_id.not_in(artifacts))
+            .values(source_task_id=None)
+        )
+        db.execute(delete(ArtifactVersion).where(ArtifactVersion.artifact_id.in_(artifacts)))
+        db.execute(delete(Artifact).where(Artifact.project_id == project_id))
+        db.execute(delete(Link).where(Link.task_id.in_(tasks) | Link.other_id.in_(tasks)))
+        db.execute(delete(Event).where(Event.task_id.in_(tasks)))
+        db.execute(delete(Task).where(Task.project_id == project_id))
+        db.delete(project)
+    # Workspaces can hold gigabytes; the answer does not wait for them.
+    paths = [ROOT / "caches" / project_id, toolchains.state_path(project_id)]
+    for task_id in task_ids:
+        paths += [ROOT / "workspaces" / task_id, ROOT / "sessions" / task_id, ROOT / "artifacts" / task_id]
+    threading.Thread(target=_remove, args=(paths,), daemon=True).start()
+    return {"deleted": project_id}
+
+
+def _remove(paths):
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
 
 
 @router.post("/api/projects/{project_id}/environment")
