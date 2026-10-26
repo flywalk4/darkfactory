@@ -533,3 +533,33 @@ def test_commit_title_comes_from_the_writer_and_the_task_title_from_the_body(pub
     assert repo.git("log", "-1", "--format=%B", sha, cwd=repo.work) == "factory: Test fix"
     # Nothing staged: no empty commit.
     assert repo.commit("Nothing") == sha
+
+
+def test_tidy_keeps_run_output_out_of_the_commit(publish_repository):
+    junk = [
+        "npm-ci.log",
+        "NPM-1974-status.md",
+        "docs/reviews/settings/browser-evidence.json",
+        "scripts/evidence/run.txt",
+        "app/logs/jest.txt",
+        "app/npm-cache/_logs/debug.txt",
+        "screenshot-1440.png",
+        "src/panel/after.jpg",
+    ]
+    kept = [
+        "src/assets/logo.png",
+        "demo/panel/shots/compact.png",
+        "public/favicon.png",
+        "src/app/logs/view.ts",
+        "src/status.ts",
+        "docs/status-codes.md",
+    ]
+    for name in junk + kept:
+        path = publish_repository.work / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n")
+    assert sorted(publish_repository.tidy()) == sorted(junk)
+    sha = publish_repository.commit()
+    tree = publish_repository.git("ls-tree", "-r", "--name-only", sha, cwd=publish_repository.work).split()
+    assert not set(junk) & set(tree) and set(kept) <= set(tree)
+    assert (publish_repository.artifacts / "run-output" / "npm-ci.log").is_file()

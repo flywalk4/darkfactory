@@ -55,6 +55,30 @@ EVIDENCE = re.compile(
 )
 
 
+# The repository hygiene rules of nocode-x scripts/check-repo-hygiene.py, for any project: logs, npm caches,
+# evidence, status files and images outside image directories are run output, not source.
+IMAGE = re.compile(r"\.(?:png|jpe?g|gif|webp|bmp)$", re.IGNORECASE)
+IMAGE_DIRS = {"assets", "shots", "design-refs", "public", "static", "images", "img", "icons", "res"}
+CACHE_DIRS = {".npm-cache", ".npm", "_cacache", "npm-cache"}
+# Code in a logs/ or evidence/ package (a log viewer, an evidence service) is source.
+OUTPUT_DIRS = {"logs", "evidence"}
+SOURCE = re.compile(r"\.(?:py|[cm]?[jt]sx?|cs|java|kt|go|rs|rb|php|vue|svelte|html|s?css|md)$", re.IGNORECASE)
+STATUS = re.compile(r"(?:^|[-_.])status\.(?:md|json|txt)$|evidence[^/]*\.json$", re.IGNORECASE)
+
+
+def run_output(path):
+    """A new file that is run output by the hygiene rules."""
+    *dirs, name = path.split("/")
+    dirs = {part.lower() for part in dirs}
+    return bool(
+        name.lower().endswith(".log")
+        or CACHE_DIRS & dirs
+        or (OUTPUT_DIRS & dirs and not SOURCE.search(name))
+        or STATUS.search(name)
+        or (IMAGE.search(name) and not IMAGE_DIRS & dirs)
+    )
+
+
 def max_new_files():
     return max(1, int(os.getenv("DARKFACTORY_MAX_NEW_FILES", "300")))
 
@@ -339,7 +363,11 @@ class Repository:
         Agents leave logs, screenshots and experiment directories behind; sending them back to clean
         up costs a whole correction cycle, so the factory removes them itself and keeps a copy.
         """
-        names = [name for name in self._added() if SCRATCH.search(name) or EVIDENCE.search(name)]
+        names = [
+            name
+            for name in self._added()
+            if SCRATCH.search(name) or EVIDENCE.search(name) or run_output(name)
+        ]
         keep = self.artifacts / "run-output"
         for name in names:
             source = self.work / name
