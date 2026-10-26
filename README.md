@@ -169,7 +169,7 @@ If your personal Codex already works through a local subscription gateway, pass 
 python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
 ```
 
-This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
+This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. A Claude connection takes the same kind of gateway in its credentials (`"base_url": "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"` for agent-stack's bili and headroom); its relay then forwards there instead of to the provider. On Linux a gateway that listens on loopback only is exposed to the containers by `scripts/systemd/darkfactory-gateway.service` (socat on the Docker bridge address); the agent-stack services must survive logout (`loginctl enable-linger`). The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
 
 ### Pools and engine selection
 

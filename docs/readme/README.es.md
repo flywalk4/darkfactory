@@ -169,7 +169,7 @@ Si tu Codex personal ya funciona a través de un gateway local de suscripción, 
 python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
 ```
 
-Este modo solo acepta direcciones HTTP locales y requiere `DARKFACTORY_PERSONAL_MODE=1`. El ejecutor se conecta al gateway indicado mediante un túnel fijo y la lista de direcciones permitidas existente; la red del contenedor sigue siendo `none`. Este modo no activa una API de pago.
+Este modo solo acepta direcciones HTTP locales y requiere `DARKFACTORY_PERSONAL_MODE=1`. Una conexión de Claude recibe la misma clase de pasarela en sus credenciales (`"base_url": "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"` para bili y headroom de agent-stack); su relé reenvía entonces allí en lugar de al proveedor. En Linux, una pasarela que escucha solo en loopback queda expuesta a los contenedores mediante `scripts/systemd/darkfactory-gateway.service` (socat en la dirección del puente Docker); los servicios de agent-stack deben sobrevivir al cierre de sesión (`loginctl enable-linger`). El ejecutor se conecta al gateway indicado mediante un túnel fijo y la lista de direcciones permitidas existente; la red del contenedor sigue siendo `none`. Este modo no activa una API de pago.
 
 ### Pools y selección de motor
 
@@ -424,7 +424,21 @@ Para los empleados, define en `.env` una dirección de la fábrica accesible par
 Cuando termina una tarea de nivel superior, la notificación también contiene un enlace **"Merge a main / rechazar"**. Es una propuesta de merge dentro de la fábrica, disponible también para Git local. Fija el commit aceptado y muestra el diff completo respecto al `main` actual (hasta 100 000 caracteres, con una marca de truncado). El propietario puede fusionar o rechazar; el enlace GET no cambia nada por sí mismo. La transferencia incluye todos los cambios de `preprod` hasta el commit indicado, incluidas las subtareas. El rechazo conserva `preprod`.
 
 > [!NOTE]
-> No hay transferencia automática a `main` ni despliegue; el Director no puede tomar esta decisión. Un proyecto de GitLab con un job de despliegue se despliega tras la fusión del propietario ([más abajo](#pruebas-del-stand-y-despliegues-en-gitlab)). Si `main` ha divergido del commit aceptado, primero hacen falta una integración y nuevas comprobaciones. Las tareas antiguas ya completadas no reciben propuestas nuevas automáticamente.
+> Por defecto no hay transferencia automática a `main`, y el Director no puede tomar esta decisión; consulta [Promoción automática](#promoción-automática) para activarla. Un proyecto de GitLab con un job de despliegue se despliega tras la fusión del propietario ([más abajo](#pruebas-del-stand-y-despliegues-en-gitlab)). Si `main` ha divergido del commit aceptado, primero hacen falta una integración y nuevas comprobaciones. Las tareas antiguas ya completadas no reciben propuestas nuevas automáticamente.
+
+### Promoción automática
+
+El propietario puede permitir que un proyecto se promueva por sí mismo: define **"Promoción automática de preprod a main tras el periodo de prueba, en horas"** (`auto_promote_hours`, `0` = solo a mano) y añade una [programación](#programaciones) **"Promoción automática de preprod a main"**. Cuando se activa la programación, el `preprod` aceptado más reciente pasa a `main` solo si:
+
+- fue aceptado hace al menos `auto_promote_hours` horas y, desde entonces, no ha habido ningún incidente en preprod;
+- la última comprobación de preprod está en buen estado y se cumplen las protecciones habituales de promoción;
+- la [comprobación de fugas](#comprobación-de-fugas) no encuentra nada en el diff `main..preprod` ni en sus mensajes de commit.
+
+La promoción queda registrada como decisión de la fábrica en la tarea, y, si está configurado, le sigue el job de despliegue de GitLab. La fila de la programación muestra por qué una ejecución no promovió.
+
+### Comprobación de fugas
+
+`scripts/leak_check.py` está pensado para proyectos que viven en un repositorio público. Como comprobación obligatoria, rechaza un cambio que añada una credencial (claves de GitLab, GitHub, OpenAI/Anthropic, Slack y AWS, claves privadas, JWT, tokens bearer, contraseñas en URLs o asignaciones) o uno de los patrones propios del propietario en las líneas añadidas, los mensajes de commit o los nombres de archivo. Los patrones del propietario (dominios internos, direcciones, inicios de sesión) van en la variable de prueba del proyecto `TEST_LEAK_PATTERNS`, uno por línea o separados por `;`; nunca entran en el repositorio. La fábrica pasa a las comprobaciones el commit base de la tarea como `DARKFACTORY_CHECK_BASE`. La salida indica la regla y la línea, nunca el valor. Un ejemplo deliberado se mantiene con el marcador `leak-check: allow` en su línea.
 
 ### Sincronizar main de vuelta a preprod
 
@@ -505,6 +519,17 @@ Cada defecto que el agente reproduce dos veces se convierte en una tarea de corr
 
 Notificaciones: `qa_reported` y `qa_not_fixed`. API: `POST /api/projects/{id}/qa` inicia una ejecución ahora. La ejecución usa el pool de escritores del proyecto y dura como máximo `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` desactiva las pruebas del stand en toda la instalación.
 
+### Compilaciones en el stand
+
+Para una plataforma que construye aplicaciones por sí misma (una plataforma low-code con un asistente en su editor), una [programación](#programaciones) **"Compilación de la aplicación en el stand"** convierte al tester en un cliente exigente. Cada ejecución toma la siguiente petición de los **"Pedidos para construir en el stand"** del proyecto (`build_tasks`, una por línea; vacío = el conjunto propio de la fábrica: solicitudes de baja, tickets de soporte, citas con el médico, una tienda con pedidos, una encuesta a empleados) y:
+
+1. inicia sesión en el tenant propio del tester y entrega la petición al constructor de la plataforma palabra por palabra, siguiendo **"Cómo compilar una aplicación en esta plataforma"** (`build_instructions`) del propietario;
+2. espera el resultado, publica o previsualiza la aplicación y la usa de principio a fin con cada rol, a 390 y 1440 px;
+3. puntúa de 0 a 5 la completitud, la corrección, la usabilidad y la calidad visual, y registra si compiló, cuánto tardó, los errores de compilación y las pruebas fallidas;
+4. convierte en tareas de corrección del proyecto de la plataforma como máximo `build_max_tasks` problemas (3 por defecto), cada una con la categoría de su causa raíz: `dsl`, `compiler`, `builder`, `components`, `studio`, `runtime` u `other`. Una tarea pide corregir la plataforma, no la aplicación generada.
+
+La fila de la programación muestra la última compilación, la proporción de compilaciones correctas y las puntuaciones medias de las últimas diez ejecuciones; se conservan las últimas 60 ejecuciones para comparar semana a semana. Las compilaciones y las pruebas del stand comparten un único slot de navegador. `DARKFACTORY_BUILD_SECONDS` (3000) limita una ejecución.
+
 ### Despliegues en GitLab
 
 Para un proyecto de GitLab, configura **"Job de despliegue de GitLab"** con el nombre de un job manual del pipeline de `main` (por ejemplo, `deploy`). Un proyecto con MR de GitLab usa el servidor de MR y su token; un proyecto sin MR usa la API junto a su URL Git HTTPS (`https://host/api/v4`) y el token de Git, así que sigue funcionando sin MR. El token necesita el alcance `api` y el permiso para ejecutar ese job, incluido el entorno protegido. Después de que el propietario fusione en `main` (ver [Promoción a main](#promoción-a-main)), la fábrica:
@@ -524,6 +549,7 @@ En la página **"Programación"** de un proyecto aparecen sus tareas recurrentes
 | Trabajo | Qué hace una ejecución |
 |---|---|
 | Prueba del stand | pide una ejecución al [tester del stand](#tester-del-stand); se omite mientras haya 8 defectos del stand abiertos |
+| Compilación de la aplicación en el stand | pide al [tester del stand](#tester-del-stand) una [compilación en el stand](#compilaciones-en-el-stand) |
 | Backlog a tareas | agrupa las notas abiertas del backlog en tareas; si no hay notas nuevas, no pasa nada |
 | Fusionar main en preprod | [sincroniza `main` en `preprod`](#sincronizar-main-de-vuelta-a-preprod) |
 | Tarea | crea una tarea normal con el título, la petición y la prioridad guardados; se omite mientras siga abierta la tarea de la ejecución anterior |
@@ -559,6 +585,25 @@ El estado se guarda en los volúmenes con nombre de PostgreSQL, `data` y `repos`
 ### Actualización
 
 Actualiza con `docker compose up -d --build`. Para que las tareas no esperen a que el worker antiguo termine sus pasos actuales, actualiza el worker mediante `scripts/deploy-worker.sh`: el nuevo worker toma trabajo de inmediato, el antiguo termina lo que empezó y se detiene. Las migraciones actuales añaden las columnas que faltan y conservan los datos existentes. Para volver atrás, restaura el código/las imágenes anteriores y reinicia los servicios; las columnas añadidas pueden permanecer. No elimines los volúmenes durante una actualización normal.
+
+### Autoactualización
+
+Un servidor puede seguir `origin/main` por sí mismo. `scripts/self-update.sh` se ejecuta desde un timer de systemd en el host, fuera de los contenedores, así que una versión rota también se revierte:
+
+1. obtiene `origin/main`; si no hay nada nuevo, o un commit que ya falló: se detiene;
+2. retiene el trabajo nuevo (`/data/system/hold`), hace fast-forward del checkout, reconstruye la app y el ejecutor, reinicia la app y arranca un worker nuevo mediante `scripts/deploy-worker.sh`;
+3. durante hasta 10 minutos espera dos minutos seguidos de una app que responde y un planificador activo (`/data/system/worker-heartbeat`) sin `Scheduler tick failed`;
+4. en caso contrario vuelve al commit anterior, reconstruye y reinicia, y recuerda el commit malo hasta que aparezca uno más nuevo.
+
+Las ediciones locales o un `main` reescrito detienen la actualización con un error en lugar de sobrescribirse. El resultado está en `/data/system/self-update.json` y en la página de la fábrica; el log es `/data/system/self-update.log`. Instalación:
+
+```sh
+cp scripts/systemd/darkfactory-update.* /etc/systemd/system/
+# set WorkingDirectory in darkfactory-update.service to this checkout
+systemctl daemon-reload && systemctl enable --now darkfactory-update.timer
+```
+
+Junto con la [promoción automática](#promoción-automática), una fábrica que desarrolla su propio repositorio se entrega a sí misma los cambios aceptados.
 
 ## Idiomas de la interfaz
 
