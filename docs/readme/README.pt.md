@@ -106,6 +106,7 @@ As configurações do Compose são lidas do `.env`:
 | `DARKFACTORY_ADMIN_TOKEN` | Token de proprietário escolhido por você | gerado em `/data/bootstrap-token` |
 | `DARKFACTORY_PERSONAL_MODE` | Modo de piloto local pessoal (veja [Conexões de executores](#conexões-de-executores)) | `0` |
 | `DARKFACTORY_PUBLIC_URL` | Endereço da fábrica usado nos links de notificação | `http://127.0.0.1:8080` |
+| `DARKFACTORY_DIRECTOR_MODEL_CLAUDE`, `DARKFACTORY_DIRECTOR_MODEL_CODEX` | Modelo do chat do Director nas assinaturas desse provedor, por exemplo um mais leve que o dos agentes. Um perfil do Director do projeto com modelo tem prioridade. Com a variável do Claude definida, o Director tenta primeiro as assinaturas do Claude | vazio: o modelo da conexão |
 
 > [!WARNING]
 > Para o acesso dos funcionários, coloque um proxy reverso HTTPS na frente da aplicação. O PostgreSQL não é publicado externamente.
@@ -158,7 +159,7 @@ Para um piloto local pessoal, você pode usar o `codex login` atual via ChatGPT.
 3. No host, execute `python3 scripts/connect_personal_codex.py`. O script cria o pool `Personal Codex` e uma conexão na organização do token de bootstrap.
 4. Atribua esse pool a um projeto; uma sessão Codex separada também pode realizar as revisões.
 
-Somente o token de acesso e o ID da conta de `~/.codex/auth.json` são importados; o token de atualização e o diretório do host não são passados aos contêineres. O token é armazenado criptografado. Depois que o token expirar ou for revogado, repita a importação enquanto a conexão estiver ociosa. O modo pessoal vem desativado por padrão, e uma instalação hospedada ou comercial usa SIWC. O escopo da autorização integrada está descrito na [documentação oficial do App Server](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
+Sem gateway, toda requisição do Codex ao ChatGPT (o backend e as chamadas ao modelo, `openai_base_url`) passa por um relay loopback no executor, que adiciona o token real. Os modelos atuais exigem o Codex 0.160 ou posterior, que só alcança o backend do ChatGPT por HTTPS; por isso o relay serve um certificado assinado por uma CA descartável, em que só esse Codex confia (`CODEX_CA_CERTIFICATE`). Somente o token de acesso e o ID da conta de `~/.codex/auth.json` são importados; o token de atualização e o diretório do host não são passados aos contêineres. O token é armazenado criptografado. Depois que o token expirar ou for revogado, repita a importação enquanto a conexão estiver ociosa. O modo pessoal vem desativado por padrão, e uma instalação hospedada ou comercial usa SIWC. O escopo da autorização integrada está descrito na [documentação oficial do App Server](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
 
 Se o seu Codex pessoal já funciona por meio de um gateway local de assinatura, informe o endereço acessível pelo Docker e o modelo configurado:
 
@@ -368,7 +369,7 @@ O comando também está disponível como `python -m darkfactory.cli director`. S
 
 ## Notificações para humanos
 
-Nas configurações, adicione um canal Rocket.Chat com um webhook HTTPS e um destinatário `@username` ou `#channel`, ou o Telegram com um token de bot e um ID de chat. No Rocket.Chat, permita a substituição do canal no webhook de entrada. O destinatário pode ser alterado sem informar a URL novamente. Selecione um projeto ou toda a organização e, em seguida, os eventos: perguntas, paradas, erros, limites, alterações aceitas e incidentes. Configurar um canal não envia nenhuma mensagem por si só. As perguntas dos agentes e as paradas do pipeline entram na fila automaticamente. A API `POST /api/tasks/{id}/notify` com `{"message":"..."}` envia uma mensagem aos canais configurados da tarefa.
+Nas configurações, adicione um canal Rocket.Chat com um webhook HTTPS e um destinatário opcional `@username` ou `#channel`, ou o Telegram com um token de bot e um ID de chat. Um destinatário do Rocket.Chat exige a substituição do canal no webhook de entrada (veja abaixo). O destinatário pode ser alterado sem informar a URL novamente. Selecione um projeto ou toda a organização e, em seguida, os eventos: perguntas, paradas, erros, limites, alterações aceitas e incidentes. Configurar um canal não envia nenhuma mensagem por si só. As perguntas dos agentes e as paradas do pipeline entram na fila automaticamente. A API `POST /api/tasks/{id}/notify` com `{"message":"..."}` envia uma mensagem aos canais configurados da tarefa.
 
 A entrega é executada separadamente das tarefas, com cinco tentativas e um intervalo entre as repetições. Os segredos não são exibidos novamente. Após uma falha entre o envio e a gravação da confirmação, é possível haver uma mensagem duplicada. As respostas às perguntas são informadas no cartão da tarefa ou diretamente no chat.
 
@@ -401,7 +402,14 @@ Crie um webhook de saída para o evento "Mensagem enviada" na mesma sala do webh
 - `!task <id>`: o cartão da tarefa.
 - `!help`: a lista de comandos.
 
-Na thread da notificação de uma tarefa, texto comum é a resposta ao agente, e `!task`, `!resume`, `!merge` e `!cancel` agem sobre essa tarefa. As notificações chegam como markdown do Rocket.Chat sob o nome Darkfactory; com `DARKFACTORY_PUBLIC_URL` definido, o logo da fábrica é o avatar.
+Na thread da notificação de uma tarefa, texto comum é a resposta ao agente, e `!task`, `!resume`, `!merge` e `!cancel` agem sobre essa tarefa.
+
+O webhook de entrada funciona em dois modos, conforme a configuração «Override Destination Channel»:
+
+- **Override desativado** (o padrão do Rocket.Chat): deixe vazio o destinatário do canal. Todas as mensagens vão para o canal do próprio webhook, e as respostas na thread levam só o ID da thread (`tmid`). O Rocket.Chat recusa aqui qualquer requisição com `roomId` ou `channel` (`overriding destination channel is disabled for this integration`); com override desativado, portanto, um destinatário faz toda entrega falhar. Coloque o webhook de saída na mesma sala que o de entrada, ou as respostas ficarão fora da thread.
+- **Override ativado**: o destinatário escolhe para onde vão as notificações, e as respostas a comandos informam a sala de origem (`roomId`) junto com `tmid`. Use este modo quando as notificações vão para uma sala diferente da do próprio webhook.
+
+O estado da entrega fica no outbox do canal (`notification_deliveries`). Uma resposta do Director a um comando do chat conta como respondida (`director_dialogues.origin_replied`) só depois de o Rocket.Chat ou o Telegram a aceitar; uma resposta recusada continua sem resposta, com o status HTTP do provedor em `last_error`. As notificações chegam como markdown do Rocket.Chat sob o nome Darkfactory; com `DARKFACTORY_PUBLIC_URL` definido, o logo da fábrica é o avatar.
 
 ### Notificações de merge
 

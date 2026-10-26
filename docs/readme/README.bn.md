@@ -106,6 +106,7 @@ Compose-এর সেটিংস `.env` থেকে পড়া হয়:
 | `DARKFACTORY_ADMIN_TOKEN` | আপনার ঠিক করা owner token | `/data/bootstrap-token`-এ তৈরি হয় |
 | `DARKFACTORY_PERSONAL_MODE` | ব্যক্তিগত লোকাল পাইলট মোড (দেখুন [এক্সিকিউটর সংযোগ](#এক্সিকিউটর-সংযোগ)) | `0` |
 | `DARKFACTORY_PUBLIC_URL` | নোটিফিকেশন লিংকে ব্যবহৃত ফ্যাক্টরির ঠিকানা | `http://127.0.0.1:8080` |
+| `DARKFACTORY_DIRECTOR_MODEL_CLAUDE`, `DARKFACTORY_DIRECTOR_MODEL_CODEX` | ওই provider-এর subscription-এ Director চ্যাটের model, যেমন এজেন্টদের চেয়ে হালকা কোনোটি। model সহ প্রজেক্টের Director profile অগ্রাধিকার পায়। Claude variable সেট থাকলে Director আগে Claude subscription চেষ্টা করে | খালি: connection-এর model |
 
 > [!WARNING]
 > কর্মীদের অ্যাক্সেসের জন্য অ্যাপ্লিকেশনের সামনে একটি HTTPS reverse proxy বসান। PostgreSQL বাইরে প্রকাশ করা হয় না।
@@ -158,7 +159,7 @@ HTTPS Git, SSH এবং `/repos`-এর লোকাল bare রিপোজি
 3. হোস্টে `python3 scripts/connect_personal_codex.py` চালান। স্ক্রিপ্টটি bootstrap token-এর অর্গানাইজেশনে `Personal Codex` পুল ও একটি সংযোগ তৈরি করে।
 4. এই পুলটি একটি প্রজেক্টে অ্যাসাইন করুন; আলাদা একটি Codex সেশনও রিভিউ করতে পারে।
 
-শুধু `~/.codex/auth.json` থেকে access token ও অ্যাকাউন্ট ID ইমপোর্ট করা হয়; refresh token ও হোস্ট ডিরেক্টরি কন্টেইনারে পাঠানো হয় না। Token এনক্রিপ্ট করে রাখা হয়। Token মেয়াদোত্তীর্ণ বা বাতিল হলে সংযোগ নিষ্ক্রিয় থাকা অবস্থায় ইমপোর্ট আবার করুন। Personal মোড ডিফল্টে বন্ধ, আর hosted বা বাণিজ্যিক ইনস্টলেশন SIWC ব্যবহার করে। বিল্ট-ইন অথরাইজেশনের পরিধি [অফিসিয়াল App Server ডকুমেন্টেশনে](https://learn.chatgpt.com/docs/app-server#auth-endpoints) বর্ণিত আছে।
+গেটওয়ে ছাড়া Codex থেকে ChatGPT-তে যাওয়া প্রতিটি অনুরোধ (backend ও model call, `openai_base_url`) executor-এর ভেতরের একটি loopback relay দিয়ে যায়, যা আসল token জুড়ে দেয়। বর্তমান model-এর জন্য Codex 0.160 বা নতুন লাগে, এবং সেটি ChatGPT backend-এ শুধু HTTPS-এ পৌঁছায়; তাই relay একবারের CA-র সই করা certificate দেয়, যাকে শুধু ওই Codex-ই বিশ্বাস করে (`CODEX_CA_CERTIFICATE`)। শুধু `~/.codex/auth.json` থেকে access token ও অ্যাকাউন্ট ID ইমপোর্ট করা হয়; refresh token ও হোস্ট ডিরেক্টরি কন্টেইনারে পাঠানো হয় না। Token এনক্রিপ্ট করে রাখা হয়। Token মেয়াদোত্তীর্ণ বা বাতিল হলে সংযোগ নিষ্ক্রিয় থাকা অবস্থায় ইমপোর্ট আবার করুন। Personal মোড ডিফল্টে বন্ধ, আর hosted বা বাণিজ্যিক ইনস্টলেশন SIWC ব্যবহার করে। বিল্ট-ইন অথরাইজেশনের পরিধি [অফিসিয়াল App Server ডকুমেন্টেশনে](https://learn.chatgpt.com/docs/app-server#auth-endpoints) বর্ণিত আছে।
 
 আপনার ব্যক্তিগত Codex যদি আগে থেকেই লোকাল সাবস্ক্রিপশন গেটওয়ের মাধ্যমে কাজ করে, তাহলে Docker থেকে পৌঁছানো যায় এমন এর ঠিকানা ও কনফিগার করা মডেল দিন:
 
@@ -368,7 +369,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ## মানুষের জন্য নোটিফিকেশন
 
-সেটিংসে HTTPS webhook ও প্রাপক `@username` বা `#channel`-সহ একটি Rocket.Chat চ্যানেল যোগ করুন, অথবা bot token ও chat ID-সহ Telegram। Rocket.Chat-এর জন্য incoming webhook-এ চ্যানেল override অনুমোদন করুন। URL আবার না দিয়েই প্রাপক বদলানো যায়। একটি প্রজেক্ট বা পুরো অর্গানাইজেশন বেছে নিন, তারপর ইভেন্ট: প্রশ্ন, স্টপ, ত্রুটি, সীমা, গৃহীত পরিবর্তন ও ইনসিডেন্ট। চ্যানেল সেট আপ করলে নিজে থেকে কোনো বার্তা পাঠানো হয় না। এজেন্টের প্রশ্ন ও পাইপলাইনের স্টপ স্বয়ংক্রিয়ভাবে কিউতে ঢোকে। `{"message":"..."}`-সহ API `POST /api/tasks/{id}/notify` টাস্কের কনফিগার করা চ্যানেলগুলোতে একটি বার্তা পাঠায়।
+সেটিংসে HTTPS webhook ও ঐচ্ছিক প্রাপক `@username` বা `#channel`-সহ একটি Rocket.Chat চ্যানেল যোগ করুন, অথবা bot token ও chat ID-সহ Telegram। Rocket.Chat-এ প্রাপক দিতে হলে incoming webhook-এ চ্যানেল override লাগবে (নিচে দেখুন)। URL আবার না দিয়েই প্রাপক বদলানো যায়। একটি প্রজেক্ট বা পুরো অর্গানাইজেশন বেছে নিন, তারপর ইভেন্ট: প্রশ্ন, স্টপ, ত্রুটি, সীমা, গৃহীত পরিবর্তন ও ইনসিডেন্ট। চ্যানেল সেট আপ করলে নিজে থেকে কোনো বার্তা পাঠানো হয় না। এজেন্টের প্রশ্ন ও পাইপলাইনের স্টপ স্বয়ংক্রিয়ভাবে কিউতে ঢোকে। `{"message":"..."}`-সহ API `POST /api/tasks/{id}/notify` টাস্কের কনফিগার করা চ্যানেলগুলোতে একটি বার্তা পাঠায়।
 
 ডেলিভারি টাস্ক থেকে আলাদাভাবে চলে, পাঁচটি চেষ্টায় এবং পুনঃচেষ্টার মাঝে বিলম্বসহ। Secret আর দেখানো হয় না। পাঠানো ও acknowledgement সংরক্ষণের মাঝে ব্যর্থতা ঘটলে ডুপ্লিকেট বার্তা সম্ভব। প্রশ্নের উত্তর টাস্ক কার্ডে বা সরাসরি চ্যাটে দেওয়া হয়।
 
@@ -401,7 +402,14 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 - `!task <id>`: টাস্ক কার্ড।
 - `!help`: কমান্ডের তালিকা।
 
-টাস্ক-নোটিফিকেশনের থ্রেডে সাধারণ লেখা এজেন্টের উত্তর, আর `!task`, `!resume`, `!merge` ও `!cancel` ওই টাস্কের উপর কাজ করে। নোটিফিকেশন Darkfactory নামে Rocket.Chat markdown-এ আসে; `DARKFACTORY_PUBLIC_URL` সেট থাকলে ফ্যাক্টরির লোগো তাদের avatar হয়।
+টাস্ক-নোটিফিকেশনের থ্রেডে সাধারণ লেখা এজেন্টের উত্তর, আর `!task`, `!resume`, `!merge` ও `!cancel` ওই টাস্কের উপর কাজ করে।
+
+Incoming webhook দুটি মোডে কাজ করে, যা তার “Override Destination Channel” সেটিং দিয়ে ঠিক হয়:
+
+- **Override বন্ধ** (Rocket.Chat-এর ডিফল্ট): চ্যানেলের প্রাপক খালি রাখুন। প্রতিটি বার্তা webhook-এর নিজের চ্যানেলে যায়, আর থ্রেডের উত্তরে শুধু থ্রেড ID (`tmid`) থাকে। এখানে Rocket.Chat `roomId` বা `channel`-সহ যেকোনো অনুরোধ প্রত্যাখ্যান করে (`overriding destination channel is disabled for this integration`), তাই override বন্ধ থাকলে প্রাপক দিলে প্রতিটি ডেলিভারি ব্যর্থ হয়। Outgoing webhook incoming webhook-এর একই রুমে রাখুন, নইলে উত্তর থ্রেডের বাইরে পড়বে।
+- **Override চালু**: প্রাপক ঠিক করে নোটিফিকেশন কোথায় যাবে, আর কমান্ডের উত্তরে `tmid`-এর পাশে যে রুম থেকে এসেছে তার নাম (`roomId`) থাকে। নোটিফিকেশন webhook-এর নিজের রুমের বাইরে অন্য রুমে গেলে এই মোড ব্যবহার করুন।
+
+ডেলিভারির অবস্থা চ্যানেলের outbox-এ (`notification_deliveries`) থাকে। চ্যাট কমান্ডের উত্তরে Director-এর জবাব তখনই replied গণ্য হয় (`director_dialogues.origin_replied`) যখন Rocket.Chat বা Telegram তা গ্রহণ করে; প্রত্যাখ্যাত জবাব unreplied থাকে এবং provider-এর HTTP status `last_error`-এ লেখা হয়। নোটিফিকেশন Darkfactory নামে Rocket.Chat markdown-এ আসে; `DARKFACTORY_PUBLIC_URL` সেট থাকলে ফ্যাক্টরির লোগো তাদের avatar হয়।
 
 ### মার্জ নোটিফিকেশন
 

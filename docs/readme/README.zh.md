@@ -106,6 +106,7 @@ Compose 的设置从 `.env` 读取：
 | `DARKFACTORY_ADMIN_TOKEN` | 你自行选择的 owner 令牌 | 生成到 `/data/bootstrap-token` |
 | `DARKFACTORY_PERSONAL_MODE` | 个人本地试用模式（见[执行器连接](#执行器连接)） | `0` |
 | `DARKFACTORY_PUBLIC_URL` | 通知链接中使用的工厂地址 | `http://127.0.0.1:8080` |
+| `DARKFACTORY_DIRECTOR_MODEL_CLAUDE`、`DARKFACTORY_DIRECTOR_MODEL_CODEX` | 在对应提供方的订阅上用于 Director 聊天的模型，例如比智能体所用更轻量的模型。项目中带模型的 Director 配置优先。设置 Claude 变量后，Director 会先尝试 Claude 订阅 | 空：使用连接的模型 |
 
 > [!WARNING]
 > 如需让员工访问，请在应用前放置 HTTPS 反向代理。PostgreSQL 不对外发布。
@@ -158,7 +159,7 @@ Compose 的设置从 `.env` 读取：
 3. 在主机上运行 `python3 scripts/connect_personal_codex.py`。脚本会在 bootstrap 令牌所属的组织中创建 `Personal Codex` 池和一个连接。
 4. 将该池分配给项目；另一个独立的 Codex 会话也可以执行评审。
 
-只会导入 `~/.codex/auth.json` 中的访问令牌和账号 ID；刷新令牌和主机目录不会传入容器。令牌以加密方式存储。令牌过期或被吊销后，请在连接空闲时重新导入。个人模式默认关闭，托管或商业安装使用 SIWC。内置授权的范围见[官方 App Server 文档](https://learn.chatgpt.com/docs/app-server#auth-endpoints)。
+没有网关时，Codex 发往 ChatGPT 的每个请求（后端和模型调用，`openai_base_url`）都经过执行器中的 loopback 中继，由它补上真实令牌。当前模型需要 Codex 0.160 或更高版本，而它只通过 HTTPS 访问 ChatGPT 后端，因此中继提供由一次性 CA 签发的证书，只有该 Codex 信任这个 CA（`CODEX_CA_CERTIFICATE`）。只会导入 `~/.codex/auth.json` 中的访问令牌和账号 ID；刷新令牌和主机目录不会传入容器。令牌以加密方式存储。令牌过期或被吊销后，请在连接空闲时重新导入。个人模式默认关闭，托管或商业安装使用 SIWC。内置授权的范围见[官方 App Server 文档](https://learn.chatgpt.com/docs/app-server#auth-endpoints)。
 
 如果你的个人 Codex 已经通过本地订阅网关工作，请传入 Docker 可访问的网关地址和已配置的模型：
 
@@ -368,7 +369,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ## 人工通知
 
-在设置中添加 Rocket.Chat 渠道（需要 HTTPS webhook 和接收者 `@username` 或 `#channel`），或添加 Telegram（需要机器人令牌和聊天 ID）。对于 Rocket.Chat，请在 incoming webhook 中允许覆盖渠道。更改接收者时无需重新输入 URL。选择一个项目或整个组织，然后选择事件：提问、停止、错误、限额、已接受的变更和事件。仅仅设置渠道不会发送任何消息。智能体的提问和流水线的停止会自动进入队列。API `POST /api/tasks/{id}/notify` 配合 `{"message":"..."}` 会向任务已配置的渠道发送消息。
+在设置中添加 Rocket.Chat 渠道（需要 HTTPS webhook 和可选的接收者 `@username` 或 `#channel`），或添加 Telegram（需要机器人令牌和聊天 ID）。Rocket.Chat 的接收者需要在 incoming webhook 中允许覆盖渠道（见下文）。更改接收者时无需重新输入 URL。选择一个项目或整个组织，然后选择事件：提问、停止、错误、限额、已接受的变更和事件。仅仅设置渠道不会发送任何消息。智能体的提问和流水线的停止会自动进入队列。API `POST /api/tasks/{id}/notify` 配合 `{"message":"..."}` 会向任务已配置的渠道发送消息。
 
 投递与任务分开运行，最多尝试五次，重试之间有延迟。密钥不会再次显示。如果在发送和保存确认之间发生故障，可能会出现重复消息。对提问的回答在任务卡片中或直接在聊天中输入。
 
@@ -401,7 +402,14 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 - `!task <id>`：任务卡片。
 - `!help`：命令列表。
 
-在任务通知的线程中，普通文本是对代理的回答，`!task`、`!resume`、`!merge` 和 `!cancel` 则作用于该任务。通知以 Darkfactory 的名义以 Rocket.Chat markdown 形式送达；设置了 `DARKFACTORY_PUBLIC_URL` 后，工厂的徽标即为其头像。
+在任务通知的线程中，普通文本是对代理的回答，`!task`、`!resume`、`!merge` 和 `!cancel` 则作用于该任务。
+
+incoming webhook 有两种工作模式，由其“Override Destination Channel”设置决定：
+
+- **Override 关闭**（Rocket.Chat 默认）：将渠道的接收者留空。所有消息都发往 webhook 自己的渠道，线程中的回答只带线程 ID（`tmid`）。Rocket.Chat 在此模式下会拒绝任何带 `roomId` 或 `channel` 的请求（`overriding destination channel is disabled for this integration`），因此关闭 override 时设置接收者会导致每次投递都失败。请把 outgoing webhook 放在与 incoming webhook 相同的房间，否则回答会落在线程之外。
+- **Override 开启**：由接收者决定通知发往何处，命令的回答会在 `tmid` 之外写明其来源房间（`roomId`）。当通知要发往 webhook 自身房间以外的房间时，请使用此模式。
+
+投递状态保存在渠道的 outbox 中（`notification_deliveries`）。Director 对聊天命令的回答只有在 Rocket.Chat 或 Telegram 接受之后才算已回复（`director_dialogues.origin_replied`）；被拒绝的回答保持未回复，并在 `last_error` 中记录提供方的 HTTP 状态。通知以 Darkfactory 的名义以 Rocket.Chat markdown 形式送达；设置了 `DARKFACTORY_PUBLIC_URL` 后，工厂的徽标即为其头像。
 
 ### 合并通知
 

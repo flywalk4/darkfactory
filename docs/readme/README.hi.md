@@ -106,6 +106,7 @@ Compose की सेटिंग्स `.env` से पढ़ी जाती 
 | `DARKFACTORY_ADMIN_TOKEN` | आपका चुना हुआ owner token | `/data/bootstrap-token` में generate होता है |
 | `DARKFACTORY_PERSONAL_MODE` | निजी स्थानीय pilot मोड (देखें [Executor कनेक्शन](#executor-कनेक्शन)) | `0` |
 | `DARKFACTORY_PUBLIC_URL` | सूचनाओं के links में इस्तेमाल होने वाला factory का address | `http://127.0.0.1:8080` |
+| `DARKFACTORY_DIRECTOR_MODEL_CLAUDE`, `DARKFACTORY_DIRECTOR_MODEL_CODEX` | उस provider की subscriptions पर Director chat का model, जैसे agents से हल्का। Model वाली project की Director profile को प्राथमिकता मिलती है। Claude वाला variable सेट होने पर Director पहले Claude subscriptions आज़माता है | खाली: connection का model |
 
 > [!WARNING]
 > कर्मचारियों की पहुँच के लिए application के आगे HTTPS reverse proxy लगाएँ। PostgreSQL बाहर publish नहीं किया जाता।
@@ -158,7 +159,7 @@ Member और token की अनुमतियों का सर्वनि
 3. Host पर `python3 scripts/connect_personal_codex.py` चलाएँ। Script bootstrap token वाले organization में `Personal Codex` pool और एक कनेक्शन बनाती है।
 4. इस pool को किसी project को सौंपें; अलग Codex session भी reviews कर सकता है।
 
-`~/.codex/auth.json` से केवल access token और account ID आयात किए जाते हैं; refresh token और host directory containers में नहीं भेजे जाते। Token एन्क्रिप्टेड रूप में संग्रहीत होता है। Token की अवधि समाप्त होने या revoke होने पर, कनेक्शन के idle रहते आयात दोहराएँ। Personal mode डिफ़ॉल्ट रूप से बंद है, और hosted या commercial installation SIWC इस्तेमाल करती है। अंतर्निहित authorization का दायरा [आधिकारिक App Server दस्तावेज़ीकरण](https://learn.chatgpt.com/docs/app-server#auth-endpoints) में वर्णित है।
+Gateway के बिना, Codex का ChatGPT को जाने वाला हर अनुरोध (backend और model calls, `openai_base_url`) executor में एक loopback relay से गुज़रता है, जो असली token जोड़ता है। मौजूदा models के लिए Codex 0.160 या नया चाहिए, और वह ChatGPT backend तक केवल HTTPS से पहुँचता है, इसलिए relay एक बार के CA से हस्ताक्षरित certificate देता है, जिस पर केवल वही Codex भरोसा करता है (`CODEX_CA_CERTIFICATE`)। `~/.codex/auth.json` से केवल access token और account ID आयात किए जाते हैं; refresh token और host directory containers में नहीं भेजे जाते। Token एन्क्रिप्टेड रूप में संग्रहीत होता है। Token की अवधि समाप्त होने या revoke होने पर, कनेक्शन के idle रहते आयात दोहराएँ। Personal mode डिफ़ॉल्ट रूप से बंद है, और hosted या commercial installation SIWC इस्तेमाल करती है। अंतर्निहित authorization का दायरा [आधिकारिक App Server दस्तावेज़ीकरण](https://learn.chatgpt.com/docs/app-server#auth-endpoints) में वर्णित है।
 
 यदि आपका personal Codex पहले से किसी स्थानीय subscription gateway से चलता है, तो उसका Docker से पहुँचने योग्य address और कॉन्फ़िगर किया गया model दें:
 
@@ -368,7 +369,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ## मनुष्यों को सूचनाएँ
 
-सेटिंग्स में HTTPS webhook और प्राप्तकर्ता `@username` या `#channel` के साथ Rocket.Chat channel जोड़ें, या bot token और chat ID के साथ Telegram। Rocket.Chat के लिए incoming webhook में channel override की अनुमति दें। प्राप्तकर्ता को URL दोबारा दर्ज किए बिना बदला जा सकता है। कोई project या पूरा organization चुनें, फिर events: प्रश्न, रुकावटें, errors, सीमाएँ, स्वीकृत बदलाव और incidents। Channel सेट करने से अपने-आप कोई संदेश नहीं जाता। Agents के प्रश्न और pipeline की रुकावटें अपने-आप queue में आ जाती हैं। API `POST /api/tasks/{id}/notify`, `{"message":"..."}` के साथ, task के कॉन्फ़िगर किए गए channels को संदेश भेजता है।
+सेटिंग्स में HTTPS webhook और वैकल्पिक प्राप्तकर्ता `@username` या `#channel` के साथ Rocket.Chat channel जोड़ें, या bot token और chat ID के साथ Telegram। Rocket.Chat में प्राप्तकर्ता के लिए incoming webhook में channel override ज़रूरी है (नीचे देखें)। प्राप्तकर्ता को URL दोबारा दर्ज किए बिना बदला जा सकता है। कोई project या पूरा organization चुनें, फिर events: प्रश्न, रुकावटें, errors, सीमाएँ, स्वीकृत बदलाव और incidents। Channel सेट करने से अपने-आप कोई संदेश नहीं जाता। Agents के प्रश्न और pipeline की रुकावटें अपने-आप queue में आ जाती हैं। API `POST /api/tasks/{id}/notify`, `{"message":"..."}` के साथ, task के कॉन्फ़िगर किए गए channels को संदेश भेजता है।
 
 Delivery tasks से अलग चलती है, पाँच प्रयासों और पुनः प्रयासों के बीच विलंब के साथ। Secrets दोबारा नहीं दिखाए जाते। भेजने और acknowledgement सहेजने के बीच विफलता के बाद duplicate संदेश संभव है। प्रश्नों के उत्तर task card में या सीधे chat में दिए जाते हैं।
 
@@ -401,7 +402,14 @@ Incoming वाले के ही room में "Message sent" event के �
 - `!task <id>`: task कार्ड।
 - `!help`: commands की सूची।
 
-Task सूचना के thread में सादा टेक्स्ट agent के लिए जवाब है, और `!task`, `!resume`, `!merge` तथा `!cancel` उसी task पर लागू होते हैं। सूचनाएँ Darkfactory नाम से Rocket.Chat markdown में आती हैं; `DARKFACTORY_PUBLIC_URL` सेट होने पर factory का logo उनका avatar होता है।
+Task सूचना के thread में सादा टेक्स्ट agent के लिए जवाब है, और `!task`, `!resume`, `!merge` तथा `!cancel` उसी task पर लागू होते हैं।
+
+Incoming webhook दो मोड में काम करता है, जो उसकी “Override Destination Channel” सेटिंग से तय होता है:
+
+- **Override बंद** (Rocket.Chat का डिफ़ॉल्ट): channel का प्राप्तकर्ता खाली छोड़ें। हर संदेश webhook के अपने channel में जाता है, और thread के जवाबों में केवल thread ID (`tmid`) होता है। यहाँ Rocket.Chat `roomId` या `channel` वाले हर अनुरोध को अस्वीकार करता है (`overriding destination channel is disabled for this integration`), इसलिए override बंद होने पर प्राप्तकर्ता देने से हर डिलीवरी विफल होती है। Outgoing webhook को incoming webhook वाले ही room में रखें, वरना जवाब thread के बाहर पहुँचेंगे।
+- **Override चालू**: प्राप्तकर्ता तय करता है कि सूचनाएँ कहाँ जाएँ, और command के जवाब `tmid` के साथ उस room का नाम (`roomId`) देते हैं जिससे वे आए थे। जब सूचनाएँ webhook के अपने room के बजाय किसी और room में जानी हों, तब यह मोड इस्तेमाल करें।
+
+डिलीवरी की स्थिति channel के outbox (`notification_deliveries`) में है। chat command पर Director का जवाब तभी replied गिना जाता है (`director_dialogues.origin_replied`) जब Rocket.Chat या Telegram उसे स्वीकार कर ले; अस्वीकार हुआ जवाब unreplied रहता है और provider का HTTP status `last_error` में दर्ज होता है। सूचनाएँ Darkfactory नाम से Rocket.Chat markdown में आती हैं; `DARKFACTORY_PUBLIC_URL` सेट होने पर factory का logo उनका avatar होता है।
 
 ### Merge सूचनाएँ
 

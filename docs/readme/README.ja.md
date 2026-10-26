@@ -106,6 +106,7 @@ Composeの設定は `.env` から読み込まれます。
 | `DARKFACTORY_ADMIN_TOKEN` | ご自身で決めるオーナートークン | `/data/bootstrap-token` に生成 |
 | `DARKFACTORY_PERSONAL_MODE` | 個人用ローカルパイロットモード（[エグゼキューター接続](#エグゼキューター接続)を参照） | `0` |
 | `DARKFACTORY_PUBLIC_URL` | 通知リンクに使うファクトリーのアドレス | `http://127.0.0.1:8080` |
+| `DARKFACTORY_DIRECTOR_MODEL_CLAUDE`、`DARKFACTORY_DIRECTOR_MODEL_CODEX` | そのプロバイダーのサブスクリプション上でのDirectorチャットのモデル。例：エージェントより軽量なもの。モデルを指定したプロジェクトのDirectorプロファイルが優先されます。Claude用の変数を設定すると、DirectorはまずClaudeサブスクリプションを試します | 空：接続のモデル |
 
 > [!WARNING]
 > 従業員にアクセスさせる場合は、アプリケーションの前段にHTTPSのリバースプロキシを置いてください。PostgreSQLは外部に公開されません。
@@ -158,7 +159,7 @@ HTTPSのGit、SSH、および `/repos` 内のローカルbareリポジトリに�
 3. ホストで `python3 scripts/connect_personal_codex.py` を実行します。スクリプトは、ブートストラップトークンの組織に `Personal Codex` プールと接続を作成します。
 4. このプールをプロジェクトに割り当てます。別のCodexセッションでレビューを行うこともできます。
 
-`~/.codex/auth.json` からインポートされるのはアクセストークンとアカウントIDのみです。リフレッシュトークンとホストのディレクトリはコンテナに渡されません。トークンは暗号化して保存されます。トークンの期限切れや失効後は、接続がアイドル状態のときにインポートをやり直してください。個人モードはデフォルトでオフです。ホスト型や商用のインストールではSIWCを使用します。組み込み認可の範囲は[公式のApp Serverドキュメント](https://learn.chatgpt.com/docs/app-server#auth-endpoints)に記載されています。
+ゲートウェイがない場合、CodexからChatGPTへのすべてのリクエスト（バックエンドとモデル呼び出し、`openai_base_url`）は、エグゼキューター内のloopbackリレーを経由し、リレーが本物のトークンを付けます。現行モデルにはCodex 0.160以降が必要で、CodexはChatGPTバックエンドにHTTPSでのみ接続するため、リレーは使い捨てのCAが署名した証明書を提示し、そのCAを信頼するのはこのCodexだけです（`CODEX_CA_CERTIFICATE`）。`~/.codex/auth.json` からインポートされるのはアクセストークンとアカウントIDのみです。リフレッシュトークンとホストのディレクトリはコンテナに渡されません。トークンは暗号化して保存されます。トークンの期限切れや失効後は、接続がアイドル状態のときにインポートをやり直してください。個人モードはデフォルトでオフです。ホスト型や商用のインストールではSIWCを使用します。組み込み認可の範囲は[公式のApp Serverドキュメント](https://learn.chatgpt.com/docs/app-server#auth-endpoints)に記載されています。
 
 個人用Codexがすでにローカルのサブスクリプションゲートウェイ経由で動作している場合は、Dockerから到達できるそのアドレスと設定済みのモデルを渡します。
 
@@ -368,7 +369,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ## 人への通知
 
-設定で、HTTPSのwebhookと受信者 `@username` または `#channel` を指定したRocket.Chatチャンネル、あるいはボットトークンとチャットIDを指定したTelegramを追加します。Rocket.Chatでは、受信webhookでチャンネルの上書きを許可してください。受信者は、URLを再入力せずに変更できます。プロジェクトまたは組織全体を選択し、続いてイベント（質問、停止、エラー、制限、受け入れられた変更、インシデント）を選択します。チャンネルを設定しただけでは、メッセージは送信されません。エージェントの質問とパイプラインの停止は、自動的にキューに入ります。`{"message":"..."}` を指定したAPI `POST /api/tasks/{id}/notify` は、タスクに設定されたチャンネルにメッセージを送信します。
+設定で、HTTPSのwebhookと任意の受信者 `@username` または `#channel` を指定したRocket.Chatチャンネル、あるいはボットトークンとチャットIDを指定したTelegramを追加します。Rocket.Chatの受信者には、受信webhookでのチャンネル上書きが必要です（下記参照）。受信者は、URLを再入力せずに変更できます。プロジェクトまたは組織全体を選択し、続いてイベント（質問、停止、エラー、制限、受け入れられた変更、インシデント）を選択します。チャンネルを設定しただけでは、メッセージは送信されません。エージェントの質問とパイプラインの停止は、自動的にキューに入ります。`{"message":"..."}` を指定したAPI `POST /api/tasks/{id}/notify` は、タスクに設定されたチャンネルにメッセージを送信します。
 
 配信はタスクとは別に、5回の試行と再試行の間の遅延付きで実行されます。シークレットは再表示されません。送信から確認応答の保存までの間に障害が起きた場合、メッセージが重複する可能性があります。質問への回答は、タスクカードまたはチャットで直接入力します。
 
@@ -401,7 +402,14 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 - `!task <id>`：タスクのカード。
 - `!help`：コマンド一覧。
 
-タスク通知のスレッドでは、通常のテキストがエージェントへの回答になり、`!task`、`!resume`、`!merge`、`!cancel` はそのタスクに作用します。通知は Darkfactory の名前で Rocket.Chat のmarkdownとして届きます。`DARKFACTORY_PUBLIC_URL` が設定されていれば、ファクトリーのロゴがアバターになります。
+タスク通知のスレッドでは、通常のテキストがエージェントへの回答になり、`!task`、`!resume`、`!merge`、`!cancel` はそのタスクに作用します。
+
+受信webhookは、「Override Destination Channel」の設定によって2つのモードで動作します。
+
+- **Override オフ**（Rocket.Chatの既定）：チャンネルの受信者は空のままにします。すべてのメッセージはwebhook自身のチャンネルに届き、スレッドでの回答にはスレッドID（`tmid`）だけが付きます。ここではRocket.Chatが `roomId` や `channel` を含むリクエストを拒否する（`overriding destination channel is disabled for this integration`）ため、overrideがオフのときに受信者を設定すると、すべての配信が失敗します。送信webhookは受信webhookと同じルームに置いてください。そうしないと、回答がスレッドの外に届きます。
+- **Override オン**：受信者が通知の送信先を決め、コマンドへの回答は `tmid` に加えて元のルーム（`roomId`）を指定します。通知をwebhook自身のルーム以外に送るときは、このモードを使ってください。
+
+配信状態はチャンネルのoutbox（`notification_deliveries`）にあります。チャットコマンドへのDirectorの回答は、Rocket.ChatまたはTelegramが受理した後にのみ返信済み（`director_dialogues.origin_replied`）になります。拒否された回答は未返信のままで、プロバイダーのHTTPステータスが `last_error` に残ります。通知は Darkfactory の名前で Rocket.Chat のmarkdownとして届きます。`DARKFACTORY_PUBLIC_URL` が設定されていれば、ファクトリーのロゴがアバターになります。
 
 ### マージ通知
 
