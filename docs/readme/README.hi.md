@@ -56,6 +56,7 @@ flowchart LR
 - [कार्यान्वयन की जाँच](#कार्यान्वयन-की-जाँच)
 - [Browser UI testing](#browser-ui-testing)
 - [स्टैंड टेस्टिंग और GitLab deploy](#स्टैंड-टेस्टिंग-और-gitlab-deploy)
+- [शेड्यूल](#शेड्यूल)
 - [API और डेटा](#api-और-डेटा)
 - [इंटरफ़ेस की भाषाएँ](#इंटरफ़ेस-की-भाषाएँ)
 - [लाइसेंस](#लाइसेंस)
@@ -427,7 +428,7 @@ Incoming webhook दो मोड में काम करता है, ज�
 
 ### main को वापस preprod में sync करना
 
-उल्टी दिशा automatic है: घंटे में एक बार (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` इसे बंद करता है) factory `main` के नए commits को `preprod` में merge करती है, उदाहरण के लिए owner के hotfixes। यदि `preprod` आगे नहीं बढ़ा है, तो वह बस `main` तक पहुँच जाता है; अन्यथा merge commit बनता है। Conflict होने पर "Merge main into preprod: conflict" नाम का task दिखता है, जिसमें merge शुरू हुआ रहता है और working folder में markers होते हैं; agent conflict सुलझाता है, जिसके बाद task सामान्य review और checks से गुज़रता है।
+उल्टी दिशा automatic है: project के **"main को preprod में मर्ज करें"** [शेड्यूल](#शेड्यूल) पर (डिफ़ॉल्ट रूप से हर घंटे; `DARKFACTORY_MAIN_SYNC_SECONDS=0` पूरे installation के लिए sync बंद करता है) factory `main` के नए commits को `preprod` में merge करती है, उदाहरण के लिए owner के hotfixes। यदि `preprod` आगे नहीं बढ़ा है, तो वह बस `main` तक पहुँच जाता है; अन्यथा merge commit बनता है। Conflict होने पर "Merge main into preprod: conflict" नाम का task दिखता है, जिसमें merge शुरू हुआ रहता है और working folder में markers होते हैं; agent conflict सुलझाता है, जिसके बाद task सामान्य review और checks से गुज़रता है।
 
 ## सीमाएँ और incidents
 
@@ -498,9 +499,9 @@ Factory deploy हुए application की जाँच स्वयं कर 
 
 **"स्टैंड का पता"** में वह page लिखें जिसे tester सबसे पहले खोलेगा, जैसे stand का Studio। **"अन्य स्टैंड पते"** में stand जिन दूसरे hosts को call करता है (sign-in server, API), उन्हें `host:port` के रूप में एक-एक पंक्ति में लिखें। यहाँ internal पते अनुमत हैं: owner इन्हें वैसे ही चुनता है जैसे allowed hosts चुने जाते हैं। Test accounts को test variables में रखें (`E2E_USER`, `E2E_PASSWORD` आदि); tester इन्हें अपने environment से पढ़ता है, और इनके मान prompt या transcript तक कभी नहीं पहुँचते।
 
-हर **N घंटे** में (`qa_hours`, डिफ़ॉल्ट 4, `0` timer बंद कर देता है), हर सफल deploy के बाद, और **"स्टैंड टेस्ट करें"** बटन पर, एक agent Chromium (Playwright MCP) में stand खोलता है और मैनुअल tester की तरह काम करता है: sign in करता है, मुख्य flows, forms, दोनों viewports, console errors और असफल requests की जाँच करता है। Agent संभावित files का नाम बता सके, इसके लिए preprod कोड read-only mount होता है। Browser केवल stand hosts तक पहुँचता है, task के egress proxy के ज़रिए; उन origins के लिए internal CA की certificate errors अनदेखी की जाती हैं।
+project के **"स्टैंड टेस्टिंग"** [शेड्यूल](#शेड्यूल) पर (डिफ़ॉल्ट रूप से हर 4 घंटे, stand address सेट होने पर बनता है), हर सफल deploy के बाद, और **"स्टैंड टेस्ट करें"** बटन पर, एक agent Chromium (Playwright MCP) में stand खोलता है और मैनुअल tester की तरह काम करता है: sign in करता है, मुख्य flows, forms, दोनों viewports, console errors और असफल requests की जाँच करता है। Agent संभावित files का नाम बता सके, इसके लिए preprod कोड read-only mount होता है। Browser केवल stand hosts तक पहुँचता है, task के egress proxy के ज़रिए; उन origins के लिए internal CA की certificate errors अनदेखी की जाती हैं।
 
-Agent जिस हर defect को दो बार reproduce करता है, वह steps, अपेक्षित और वास्तविक परिणाम तथा screenshots के साथ एक सामान्य fix task बन जाता है। हर run में अधिकतम `qa_max_tasks` tasks (डिफ़ॉल्ट 3); खुले stand bugs अगले run को दिए जाते हैं ताकि उन्हें दोबारा report न किया जाए, और 8 खुले होने पर timer रुक जाता है। Agent केवल `df-qa-` prefix वाला अपना data बनाता है और users या settings कभी नहीं बदलता। Deploy के बाद वह पहले उन stand bugs की दोबारा जाँच करता है जिनके fixes जा चुके हैं: पुष्टि हुए fix को task पर चिह्नित किया जाता है, और जो bug अब भी reproduce होता है उसके लिए नया संबंधित task बनता है।
+Agent जिस हर defect को दो बार reproduce करता है, वह steps, अपेक्षित और वास्तविक परिणाम तथा screenshots के साथ एक सामान्य fix task बन जाता है। हर run में अधिकतम `qa_max_tasks` tasks (डिफ़ॉल्ट 3); खुले stand bugs अगले run को दिए जाते हैं ताकि उन्हें दोबारा report न किया जाए, और 8 खुले होने पर scheduled runs छोड़ दिए जाते हैं। Agent केवल `df-qa-` prefix वाला अपना data बनाता है और users या settings कभी नहीं बदलता। Deploy के बाद वह पहले उन stand bugs की दोबारा जाँच करता है जिनके fixes जा चुके हैं: पुष्टि हुए fix को task पर चिह्नित किया जाता है, और जो bug अब भी reproduce होता है उसके लिए नया संबंधित task बनता है।
 
 Notifications: `qa_reported` और `qa_not_fixed`। API: `POST /api/projects/{id}/qa` अभी run शुरू करता है। Run project का writer pool इस्तेमाल करता है और अधिकतम `DARKFACTORY_QA_SECONDS` (1800) तक चलता है; `DARKFACTORY_STAND_QA=0` पूरे installation के लिए stand testing बंद कर देता है।
 
@@ -515,6 +516,21 @@ GitLab project के लिए **"GitLab डिप्लॉय जॉब"** म
 5. सफल deploy के बाद stand tester शुरू करती है।
 
 Image build विफल होने पर deploy job चलाए बिना deploy रुक जाता है। GitLab से पहले से शुरू हुए deploy job को follow किया जाता है, दोबारा शुरू नहीं किया जाता। एक deploy चलते समय नया merge उसके पूरा होने तक इंतज़ार करता है। **"main डिप्लॉय करें"** बटन और `POST /api/projects/{id}/deploy` owner के अनुरोध पर `main` की वर्तमान tip deploy करते हैं। कोई automatic rollback नहीं है; विफल release को कैसे संभालना है, यह job स्वयं तय करता है।
+
+## शेड्यूल
+
+project के **"शेड्यूल"** page पर उसके recurring jobs की सूची होती है। हर schedule में एक cron line (`minute hour day month weekday`, उदाहरण के लिए `0 9 * * 1-5`; `@hourly`, `@daily`, `@weekly` और `@monthly` भी चलते हैं), एक time zone, एक on/off switch, अगला और पिछला run और पिछला result होता है। तैयार presets cron line भर देते हैं। Owner schedules बनाता, बदलता और हटाता है; operator **"अभी चलाएँ"** से कोई schedule तुरंत शुरू कर सकता है, और उसका नियमित समय नहीं बदलता।
+
+| Job | एक run क्या करता है |
+|---|---|
+| स्टैंड टेस्टिंग | [stand tester](#stand-tester) से run माँगता है; 8 stand bugs खुले होने पर छोड़ दिया जाता है |
+| बैकलॉग से कार्य | खुले backlog notes को tasks में समूहित करता है; नए notes न होने पर कुछ नहीं होता |
+| main को preprod में मर्ज करें | [`main` को `preprod` में sync करता है](#main-को-वापस-preprod-में-sync-करना) |
+| टास्क | सहेजे गए title, request और priority के साथ एक सामान्य task बनाता है; पिछले run का task अभी खुला हो तो छोड़ दिया जाता है |
+
+नए project को हर घंटे main sync और हर 4 घंटे backlog run मिलता है; stand address सेट होने पर stand tester schedule दिखता है। पहले से जुड़े projects को उनकी पुरानी interval settings से वही schedules एक बार मिलते हैं। Factory outage के बाद किसी schedule के छूटे हुए runs एक में समेट दिए जाते हैं। `DARKFACTORY_TIMEZONE` डिफ़ॉल्ट time zone (UTC) तय करता है; form में browser का time zone दिया जाता है।
+
+API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
 
 ## API और डेटा
 

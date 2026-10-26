@@ -19,6 +19,7 @@ from .. import (
     environment,
     initialization,
     mainsync,
+    schedules,
     service,
     standqa,
     toolchains,
@@ -314,6 +315,7 @@ def create_project(value: ProjectInput, a=Depends(access)):
         )
         db.add(project)
         db.flush()
+        schedules.seed(db, project)
         if value.initialize:
             initialization.queue(db, project, a.principal.id)
         if value.prepare_environment:
@@ -361,6 +363,8 @@ def update_project(project_id: str, value: ProjectInput, a=Depends(access)):
         ).items():
             setattr(project, key, item)
         project.secret = project_secrets(value, project.secret)
+        if value.stand_url:
+            schedules.stand_added(db, project)
         return public(project)
 
 
@@ -397,6 +401,7 @@ def delete_project(project_id: str, a=Depends(access)):
         )
         db.execute(delete(ChatThread).where(ChatThread.project_id == project_id))
         db.execute(delete(BacklogItem).where(BacklogItem.project_id == project_id))
+        db.execute(delete(schedules.Schedule).where(schedules.Schedule.project_id == project_id))
         db.execute(
             delete(ArtifactInput).where(
                 ArtifactInput.task_id.in_(tasks) | ArtifactInput.artifact_id.in_(artifacts)

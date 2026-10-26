@@ -3,7 +3,7 @@ import json
 from conftest import connect
 from sqlalchemy import select
 
-from darkfactory import db, standqa
+from darkfactory import db, schedules, standqa
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
@@ -76,12 +76,20 @@ def project_tasks(project_id):
         )
 
 
-def test_timer_runs_tester_and_turns_reproduced_bugs_into_fix_tasks(client, setup_project):
+def test_schedule_runs_tester_and_turns_reproduced_bugs_into_fix_tasks(client, setup_project):
     project, pool = setup_project
     connect(client, pool)
     assert not standqa.run(StandAgent(report()))  # No stand configured.
     view = configure(client, project)
-    assert view["stand_url"] == "https://studio.example.invalid/" and view["qa_hours"] == 4
+    assert view["stand_url"] == "https://studio.example.invalid/"
+    # Setting a stand gives the project the default tester schedule; firing it asks for a run.
+    items = client.get(f"/api/projects/{project['id']}/schedules").json()["items"]
+    tester_schedule = next(item for item in items if item["kind"] == "stand_qa")
+    assert tester_schedule["cron"] == "0 */4 * * *"
+    assert not standqa.run(StandAgent(report()))
+    with db.transaction() as session:
+        session.get(schedules.Schedule, tester_schedule["id"]).next_at = 1
+    schedules.tick(force=True)
 
     tester = StandAgent(
         report(
@@ -110,7 +118,7 @@ def test_timer_runs_tester_and_turns_reproduced_bugs_into_fix_tasks(client, setu
         state = standqa.state(session.get(db.Project, project["id"]))
     assert state["tasks"] == 2 and state["checked"] == ["login"] and not state.get("running")
 
-    # Not due again until the interval passes; the next run is told what is already open.
+    # Not due again until the schedule fires; the next run is told what is already open.
     assert not standqa.run(tester)
     client.post(f"/api/projects/{project['id']}/qa")
     assert standqa.run(tester)

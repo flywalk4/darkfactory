@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Darkfactory</title><link rel="icon" type="image/svg+xml" href="/static/logo.svg"><link rel="stylesheet" href="/static/style.css?v=20261026-result">
   <link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/chat.css?v=20261022-images">
-  <link rel="stylesheet" href="/static/registry.css"><link rel="stylesheet" href="/static/backlog.css?v=20261025-disk2"><link rel="stylesheet" href="/static/transcript.css?v=20261026-diff2"><link rel="stylesheet" href="/static/attach.css?v=20261022-attach">
+  <link rel="stylesheet" href="/static/registry.css"><link rel="stylesheet" href="/static/backlog.css?v=20261026-schedules"><link rel="stylesheet" href="/static/transcript.css?v=20261026-diff2"><link rel="stylesheet" href="/static/attach.css?v=20261022-attach">
 </head>
 <body>
 <div id="login" class="login">
@@ -24,6 +24,7 @@
     <button class="nav active" data-view="board"><span class="nav-icon">▦</span><span class="nav-text">Задачи</span></button>
     <button class="nav" data-view="factory"><span class="nav-icon">◷</span><span class="nav-text">Фабрика</span></button>
     <button class="nav" data-view="backlog"><span class="nav-icon">☰</span><span class="nav-text">Бэклог</span></button>
+    <button class="nav" data-view="schedules"><span class="nav-icon">⏲</span><span class="nav-text">Расписание</span></button>
     <button class="nav" data-view="artifacts"><span class="nav-icon">▤</span><span class="nav-text">Артефакты проекта</span></button>
     <button class="nav" data-view="agents"><span class="nav-icon">◈</span><span class="nav-text">Агенты, скиллы и MCP</span></button>
     <button class="nav" data-view="settings"><span class="nav-icon">⚙</span><span class="nav-text">Подключения и проекты</span></button>
@@ -47,6 +48,7 @@
     <section id="agents-view" hidden><div id="agent-workspace"></div></section>
     <section id="factory-view" hidden><div id="factory-workspace"></div></section>
     <section id="backlog-view" hidden><div id="backlog-workspace"></div></section>
+    <section id="schedules-view" hidden><div id="schedules-workspace"></div></section>
     <section id="artifacts-view" hidden><div id="artifact-workspace"></div></section>
     <section id="settings-view" hidden>
       <div class="page-title"><div><div class="eyebrow">ИНФРАСТРУКТУРА</div><h1>Подключения и проекты</h1><p>Репозитории, пулы и доступы твоей компании.</p></div></div>
@@ -63,8 +65,9 @@
 <div id="toast" role="status" hidden></div>
 <script src="/static/i18n.js?v=20261026-i18n" defer></script>
 <script src="/static/attach.js?v=20261022-attach" defer></script>
-<script src="/static/app.js?v=20261029-result" defer></script>
-<script src="/static/backlog.js?v=20261025-disk" defer></script>
+<script src="/static/app.js?v=20261026-schedules" defer></script>
+<script src="/static/backlog.js?v=20261026-schedules" defer></script>
+<script src="/static/schedules.js?v=20261026-schedules2" defer></script>
 <script src="/static/registry.js?v=20261027-poll" defer></script>
 <script src="/static/promotions.js?v=20261028-included" defer></script>
 <script src="/static/factory.js?v=20261028-factory" defer></script>

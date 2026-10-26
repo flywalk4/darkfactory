@@ -7,6 +7,7 @@ from sqlalchemy import and_, func, or_, select
 from .. import (
     backlog,
     cleanup,
+    schedules,
 )
 from ..db import (
     Session,
@@ -53,14 +54,20 @@ def backlog_view(db, project):
             }
         )
     current = backlog.state(project)
-    hours = backlog.interval_hours(project)
+    schedule = db.scalars(
+        select(schedules.Schedule)
+        .where(
+            schedules.Schedule.project_id == project.id,
+            schedules.Schedule.kind == "backlog",
+            schedules.Schedule.enabled.is_(True),
+        )
+        .order_by(schedules.Schedule.next_at)
+    ).first()
     open_items = [row for row in rows if row["state"] == "open"]
-    next_at = None
-    if hours and open_items and not current.get("requested"):
-        next_at = max(min(row["created"] for row in open_items), current.get("at", 0)) + hours * 3600
+    next_at = schedule.next_at if schedule and open_items and not current.get("requested") else None
     return {
         "items": rows,
-        "hours": hours,
+        "cron": schedule.cron if schedule else None,
         "requested": current.get("requested"),
         "last_at": current.get("at"),
         "last_error": current.get("error"),

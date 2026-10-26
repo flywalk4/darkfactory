@@ -56,6 +56,7 @@ Por defecto, una tarea va directamente a un único desarrollador, sin plan ni su
 - [Comprobaciones de la implementación](#comprobaciones-de-la-implementación)
 - [Pruebas de UI en el navegador](#pruebas-de-ui-en-el-navegador)
 - [Pruebas del stand y despliegues en GitLab](#pruebas-del-stand-y-despliegues-en-gitlab)
+- [Programaciones](#programaciones)
 - [API y datos](#api-y-datos)
 - [Idiomas de la interfaz](#idiomas-de-la-interfaz)
 - [Licencia](#licencia)
@@ -427,7 +428,7 @@ Cuando termina una tarea de nivel superior, la notificación también contiene u
 
 ### Sincronizar main de vuelta a preprod
 
-La dirección inversa es automática: una vez por hora (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` la desactiva) la fábrica fusiona en `preprod` los commits nuevos de `main`, por ejemplo los hotfixes del propietario. Si `preprod` no ha avanzado, simplemente se pone al día con `main`; en caso contrario se crea un commit de merge. En caso de conflicto aparece una tarea "Merge main into preprod: conflict" con el merge iniciado y marcadores en la carpeta de trabajo; el agente resuelve el conflicto, tras lo cual la tarea pasa por la revisión y las comprobaciones habituales.
+La dirección inversa es automática: en la [programación](#programaciones) **"Fusionar main en preprod"** del proyecto (una vez por hora de forma predeterminada; `DARKFACTORY_MAIN_SYNC_SECONDS=0` desactiva la sincronización en toda la instalación) la fábrica fusiona en `preprod` los commits nuevos de `main`, por ejemplo los hotfixes del propietario. Si `preprod` no ha avanzado, simplemente se pone al día con `main`; en caso contrario se crea un commit de merge. En caso de conflicto aparece una tarea "Merge main into preprod: conflict" con el merge iniciado y marcadores en la carpeta de trabajo; el agente resuelve el conflicto, tras lo cual la tarea pasa por la revisión y las comprobaciones habituales.
 
 ## Límites e incidentes
 
@@ -498,9 +499,9 @@ La fábrica puede probar por sí misma la aplicación desplegada y desplegar `ma
 
 Configura **"Dirección del stand"** con la página que el tester abre primero, por ejemplo el Studio del stand. En **"Otras direcciones del stand"** indica, en formato `host:port`, los demás hosts a los que llama el stand (servidor de autenticación, API). Aquí se permiten direcciones internas: el propietario las elige igual que los hosts permitidos. Coloca las cuentas de prueba en las variables de test (`E2E_USER`, `E2E_PASSWORD`, etc.); el tester las lee de su entorno, y sus valores nunca llegan al prompt ni a la transcripción.
 
-Cada **N horas** (`qa_hours`, 4 por defecto, `0` desactiva el temporizador), después de cada despliegue correcto y con el botón **"Probar el stand"**, un agente abre el stand en Chromium (Playwright MCP) y trabaja como un tester manual: inicia sesión, recorre los flujos principales, formularios, ambos viewports, errores de consola y peticiones fallidas. El código de preprod se monta en modo solo lectura para que el agente pueda nombrar los archivos probables. El navegador solo llega a los hosts del stand, a través del proxy de salida de la tarea; los errores de certificado de una CA interna se ignoran para esos orígenes.
+En la [programación](#programaciones) **"Prueba del stand"** del proyecto (cada 4 horas por defecto; se crea al definir la dirección del stand), después de cada despliegue correcto y con el botón **"Probar el stand"**, un agente abre el stand en Chromium (Playwright MCP) y trabaja como un tester manual: inicia sesión, recorre los flujos principales, formularios, ambos viewports, errores de consola y peticiones fallidas. El código de preprod se monta en modo solo lectura para que el agente pueda nombrar los archivos probables. El navegador solo llega a los hosts del stand, a través del proxy de salida de la tarea; los errores de certificado de una CA interna se ignoran para esos orígenes.
 
-Cada defecto que el agente reproduce dos veces se convierte en una tarea de corrección normal, con los pasos, el resultado esperado y el real, y las capturas adjuntas. Como máximo `qa_max_tasks` tareas por ejecución (3 por defecto); los defectos abiertos del stand se pasan a la siguiente ejecución para no reportarlos de nuevo, y el temporizador se pausa mientras haya 8 abiertos. El agente solo crea sus propios datos con el prefijo `df-qa-` y nunca cambia usuarios ni ajustes. Tras un despliegue, primero vuelve a comprobar los defectos del stand cuyas correcciones se han publicado: una corrección confirmada se marca en la tarea, y un defecto que sigue reproduciéndose recibe una nueva tarea relacionada.
+Cada defecto que el agente reproduce dos veces se convierte en una tarea de corrección normal, con los pasos, el resultado esperado y el real, y las capturas adjuntas. Como máximo `qa_max_tasks` tareas por ejecución (3 por defecto); los defectos abiertos del stand se pasan a la siguiente ejecución para no reportarlos de nuevo, y se omiten las ejecuciones programadas mientras haya 8 abiertos. El agente solo crea sus propios datos con el prefijo `df-qa-` y nunca cambia usuarios ni ajustes. Tras un despliegue, primero vuelve a comprobar los defectos del stand cuyas correcciones se han publicado: una corrección confirmada se marca en la tarea, y un defecto que sigue reproduciéndose recibe una nueva tarea relacionada.
 
 Notificaciones: `qa_reported` y `qa_not_fixed`. API: `POST /api/projects/{id}/qa` inicia una ejecución ahora. La ejecución usa el pool de escritores del proyecto y dura como máximo `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` desactiva las pruebas del stand en toda la instalación.
 
@@ -515,6 +516,21 @@ Para un proyecto de GitLab, configura **"Job de despliegue de GitLab"** con el n
 5. tras un despliegue correcto, inicia el tester del stand.
 
 Un fallo en la construcción de la imagen detiene el despliegue sin ejecutar el job. Un job de despliegue ya iniciado desde GitLab se sigue, no se vuelve a iniciar. Mientras se ejecuta un despliegue, una fusión más nueva espera a que termine. El botón **"Desplegar main"** y `POST /api/projects/{id}/deploy` despliegan la punta actual de `main` a petición del propietario. No hay rollback automático; el propio job decide cómo tratar una versión fallida.
+
+## Programaciones
+
+En la página **"Programación"** de un proyecto aparecen sus tareas recurrentes. Cada programación tiene una línea cron (`minute hour day month weekday`, por ejemplo `0 9 * * 1-5`; también funcionan `@hourly`, `@daily`, `@weekly` y `@monthly`), una zona horaria, un interruptor de activación, sus próximas y últimas ejecuciones y el último resultado. Los presets listos para usar rellenan la línea cron. El propietario crea, modifica y elimina programaciones; un operador también puede iniciar una de inmediato con **"Ejecutar ahora"**, sin que cambie su horario habitual.
+
+| Trabajo | Qué hace una ejecución |
+|---|---|
+| Prueba del stand | pide una ejecución al [tester del stand](#tester-del-stand); se omite mientras haya 8 defectos del stand abiertos |
+| Backlog a tareas | agrupa las notas abiertas del backlog en tareas; si no hay notas nuevas, no pasa nada |
+| Fusionar main en preprod | [sincroniza `main` en `preprod`](#sincronizar-main-de-vuelta-a-preprod) |
+| Tarea | crea una tarea normal con el título, la petición y la prioridad guardados; se omite mientras siga abierta la tarea de la ejecución anterior |
+
+Un proyecto nuevo recibe una sincronización de main cada hora y una ejecución del backlog cada 4 horas; la programación del tester del stand aparece cuando se define una dirección del stand. Los proyectos conectados antes reciben una sola vez las mismas programaciones a partir de sus antiguos ajustes de intervalo. Tras una caída de la fábrica, las ejecuciones perdidas de una programación se reducen a una. `DARKFACTORY_TIMEZONE` define la zona horaria predeterminada (UTC); el formulario ofrece la del navegador.
+
+API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
 
 ## API y datos
 

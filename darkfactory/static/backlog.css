@@ -18,3 +18,6 @@ button.backlog-task:hover{background:#1a2333;filter:none}.backlog-task span:nth-
 .backlog-source{font-size:11px;line-height:1.5;padding:4px 8px 6px 23px;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:700px){.backlog-item{flex-direction:column;gap:6px}.backlog-meta{align-self:flex-end}}
 @media(max-width:700px){#backlog-view .page-title{flex-direction:column;align-items:stretch;gap:14px}#backlog-plan{width:100%}}
+.schedule-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}.schedule-main strong{font-size:13px;color:#dde3ee}.schedule-main code{font-size:11px}.schedule-main p{font-size:12px;margin-top:4px}
+.schedule-item.off{opacity:.55}.schedule-result{color:#b6c8ee}
+@media(max-width:700px){#schedules-view .page-title{flex-direction:column;align-items:stretch;gap:14px}}

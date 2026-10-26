@@ -56,6 +56,7 @@ By default a task goes straight to a single developer, with no plan and no subta
 - [Implementation checks](#implementation-checks)
 - [Browser UI testing](#browser-ui-testing)
 - [Stand testing and GitLab deploys](#stand-testing-and-gitlab-deploys)
+- [Schedules](#schedules)
 - [API and data](#api-and-data)
 - [Interface languages](#interface-languages)
 - [License](#license)
@@ -427,7 +428,7 @@ When a top-level task completes, the notification also contains a **"Merge to ma
 
 ### Syncing main back into preprod
 
-The reverse direction is automatic: once an hour (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` disables) the factory merges new `main` commits into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with `main`; otherwise a merge commit is created. On conflict, a task "Merge main into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
+The reverse direction is automatic: on the project's **"Merge main into preprod"** [schedule](#schedules) (hourly by default; `DARKFACTORY_MAIN_SYNC_SECONDS=0` turns syncing off for the installation) the factory merges new `main` commits into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with `main`; otherwise a merge commit is created. On conflict, a task "Merge main into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
 
 ## Limits and incidents
 
@@ -498,9 +499,9 @@ The factory can test the deployed application itself and deploy `main` through G
 
 Set **"Stand address"** to the page the tester opens first, for example the Studio of the stand. List the other hosts the stand calls (sign-in server, API) in **"Other stand hosts"** as `host:port`. Internal addresses are allowed here: the owner chooses them like allowed hosts. Put test accounts into the test variables (`E2E_USER`, `E2E_PASSWORD` and so on); the tester reads them from its environment, and their values never reach the prompt or the transcript.
 
-Every **N hours** (`qa_hours`, 4 by default, `0` turns the timer off), after each successful deploy and on the **"Test stand"** button, an agent opens the stand in Chromium (Playwright MCP) and works like a manual tester: it signs in, goes through the main flows, forms, both viewports, console errors and failed requests. The preprod code is mounted read-only so the agent can name the likely files. The browser reaches only the stand hosts, through the task's egress proxy; certificate errors of an internal CA are ignored for those origins.
+On the project's **"Stand testing"** [schedule](#schedules) (every 4 hours by default, created when the stand address is set), after each successful deploy and on the **"Test stand"** button, an agent opens the stand in Chromium (Playwright MCP) and works like a manual tester: it signs in, goes through the main flows, forms, both viewports, console errors and failed requests. The preprod code is mounted read-only so the agent can name the likely files. The browser reaches only the stand hosts, through the task's egress proxy; certificate errors of an internal CA are ignored for those origins.
 
-Each defect the agent reproduced twice becomes an ordinary fix task with the steps, the expected and actual result and the screenshots attached. At most `qa_max_tasks` tasks per run (3 by default); open stand bugs are passed to the next run so they are not reported again, and the timer pauses while 8 of them are open. The agent creates only its own data with the `df-qa-` prefix and never changes users or settings. After a deploy it first re-checks the stand bugs whose fixes went out: a confirmed fix is marked on the task, and a bug that still reproduces gets a new related task.
+Each defect the agent reproduced twice becomes an ordinary fix task with the steps, the expected and actual result and the screenshots attached. At most `qa_max_tasks` tasks per run (3 by default); open stand bugs are passed to the next run so they are not reported again, and scheduled runs are skipped while 8 of them are open. The agent creates only its own data with the `df-qa-` prefix and never changes users or settings. After a deploy it first re-checks the stand bugs whose fixes went out: a confirmed fix is marked on the task, and a bug that still reproduces gets a new related task.
 
 Notifications: `qa_reported` and `qa_not_fixed`. API: `POST /api/projects/{id}/qa` starts a run now. The run uses the project's writer pool and lasts at most `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` turns stand testing off for the whole installation.
 
@@ -515,6 +516,21 @@ For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in
 5. after a successful deploy, starts the stand tester.
 
 A failed image build stops the deploy without playing the job. A deploy job already started from GitLab is followed, not started again. While one deploy runs, a newer merge waits for it. The **"Deploy main"** button and `POST /api/projects/{id}/deploy` deploy the current `main` tip on the owner's request. There is no automatic rollback; the job itself decides how to handle a failed release.
+
+## Schedules
+
+The **"Schedules"** page of a project lists its recurring jobs. Each schedule has a cron line (`minute hour day month weekday`, for example `0 9 * * 1-5`; `@hourly`, `@daily`, `@weekly` and `@monthly` work too), a time zone, an on/off switch, its next and last run and the last result. Ready-made presets fill the cron line. The owner creates, changes and deletes schedules; an operator can also start one at once with **"Run now"**, which leaves its regular time as it was.
+
+| Job | What a run does |
+|---|---|
+| Stand testing | asks the [stand tester](#stand-tester) for a run; skipped while 8 stand bugs are open |
+| Backlog into tasks | groups the open backlog notes into tasks; nothing happens without new notes |
+| Merge main into preprod | [syncs `main` into `preprod`](#syncing-main-back-into-preprod) |
+| Task | creates an ordinary task with the saved title, request and priority; skipped while the task of the previous run is still open |
+
+A new project gets an hourly main sync and a backlog run every 4 hours; the stand tester schedule appears when a stand address is set. Projects connected earlier get the same schedules from their old interval settings once. After a factory outage the missed runs of a schedule collapse into one. `DARKFACTORY_TIMEZONE` sets the default time zone (UTC); the form offers the browser's.
+
+API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
 
 ## API and data
 

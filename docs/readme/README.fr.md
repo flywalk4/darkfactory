@@ -56,6 +56,7 @@ Par défaut, une tâche va directement à un seul développeur, sans plan ni sou
 - [Vérification de la mise en œuvre](#vérification-de-la-mise-en-œuvre)
 - [Tests UI dans le navigateur](#tests-ui-dans-le-navigateur)
 - [Tests du stand et déploiements GitLab](#tests-du-stand-et-déploiements-gitlab)
+- [Planifications](#planifications)
 - [API et données](#api-et-données)
 - [Langues disponibles](#langues-disponibles)
 - [Licence](#licence)
@@ -427,7 +428,7 @@ Lorsqu'une tâche de premier niveau se termine, la notification contient aussi u
 
 ### Resynchronisation de main vers preprod
 
-Le sens inverse est automatique : une fois par heure (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` désactive), l'usine fusionne les nouveaux commits de `main` dans `preprod`, par exemple les correctifs urgents du propriétaire. Si `preprod` n'a pas avancé, elle se contente de rattraper `main` ; sinon un commit de fusion est créé. En cas de conflit, une tâche « Merge main into preprod: conflict » apparaît avec la fusion démarrée et les marqueurs dans le dossier de travail ; l'agent résout le conflit, puis la tâche suit la revue et les vérifications habituelles.
+Le sens inverse est automatique : selon la [planification](#planifications) « Fusionner main dans preprod » du projet (une fois par heure par défaut ; `DARKFACTORY_MAIN_SYNC_SECONDS=0` désactive la synchronisation pour toute l'installation), l'usine fusionne les nouveaux commits de `main` dans `preprod`, par exemple les correctifs urgents du propriétaire. Si `preprod` n'a pas avancé, elle se contente de rattraper `main` ; sinon un commit de fusion est créé. En cas de conflit, une tâche « Merge main into preprod: conflict » apparaît avec la fusion démarrée et les marqueurs dans le dossier de travail ; l'agent résout le conflit, puis la tâche suit la revue et les vérifications habituelles.
 
 ## Limites et incidents
 
@@ -498,9 +499,9 @@ L'usine peut tester elle-même l'application déployée et déployer `main` via 
 
 Renseignez **« Adresse du stand »** avec la page que le testeur ouvre en premier, par exemple le Studio du stand. Listez dans **« Autres adresses du stand »** les autres hôtes appelés par le stand (serveur d'authentification, API), au format `host:port`. Les adresses internes sont autorisées ici : le propriétaire les choisit comme les hôtes autorisés. Placez les comptes de test dans les variables de test (`E2E_USER`, `E2E_PASSWORD`, etc.) ; le testeur les lit depuis son environnement, et leurs valeurs n'atteignent jamais le prompt ni la transcription.
 
-Toutes les **N heures** (`qa_hours`, 4 par défaut, `0` désactive la minuterie), après chaque déploiement réussi et sur le bouton **« Tester le stand »**, un agent ouvre le stand dans Chromium (Playwright MCP) et travaille comme un testeur manuel : il se connecte, parcourt les parcours principaux, les formulaires, les deux viewports, les erreurs de console et les requêtes échouées. Le code de preprod est monté en lecture seule afin que l'agent puisse nommer les fichiers probables. Le navigateur n'atteint que les hôtes du stand, via le proxy de sortie de la tâche ; les erreurs de certificat d'une CA interne sont ignorées pour ces origines.
+Selon la [planification](#planifications) **« Test du stand »** du projet (toutes les 4 heures par défaut, créée lorsque l'adresse du stand est définie), après chaque déploiement réussi et sur le bouton **« Tester le stand »**, un agent ouvre le stand dans Chromium (Playwright MCP) et travaille comme un testeur manuel : il se connecte, parcourt les parcours principaux, les formulaires, les deux viewports, les erreurs de console et les requêtes échouées. Le code de preprod est monté en lecture seule afin que l'agent puisse nommer les fichiers probables. Le navigateur n'atteint que les hôtes du stand, via le proxy de sortie de la tâche ; les erreurs de certificat d'une CA interne sont ignorées pour ces origines.
 
-Chaque défaut que l'agent a reproduit deux fois devient une tâche de correction ordinaire, avec les étapes, le résultat attendu et le résultat réel, et les captures d'écran jointes. Au maximum `qa_max_tasks` tâches par exécution (3 par défaut) ; les bogues ouverts du stand sont transmis à l'exécution suivante pour ne pas être signalés de nouveau, et la minuterie se met en pause tant que 8 d'entre eux sont ouverts. L'agent ne crée que ses propres données, avec le préfixe `df-qa-`, et ne modifie jamais les utilisateurs ni les paramètres. Après un déploiement, il revérifie d'abord les bogues du stand dont les corrections ont été livrées : une correction confirmée est marquée sur la tâche, et un bogue qui se reproduit encore reçoit une nouvelle tâche liée.
+Chaque défaut que l'agent a reproduit deux fois devient une tâche de correction ordinaire, avec les étapes, le résultat attendu et le résultat réel, et les captures d'écran jointes. Au maximum `qa_max_tasks` tâches par exécution (3 par défaut) ; les bogues ouverts du stand sont transmis à l'exécution suivante pour ne pas être signalés de nouveau, et les exécutions planifiées sont ignorées tant que 8 d'entre eux sont ouverts. L'agent ne crée que ses propres données, avec le préfixe `df-qa-`, et ne modifie jamais les utilisateurs ni les paramètres. Après un déploiement, il revérifie d'abord les bogues du stand dont les corrections ont été livrées : une correction confirmée est marquée sur la tâche, et un bogue qui se reproduit encore reçoit une nouvelle tâche liée.
 
 Notifications : `qa_reported` et `qa_not_fixed`. API : `POST /api/projects/{id}/qa` lance une exécution immédiatement. L'exécution utilise le pool d'écrivains du projet et dure au plus `DARKFACTORY_QA_SECONDS` (1800) ; `DARKFACTORY_STAND_QA=0` désactive les tests du stand pour toute l'installation.
 
@@ -515,6 +516,21 @@ Pour un projet GitLab, renseignez **« Job de déploiement GitLab »** avec le n
 5. après un déploiement réussi, démarre le testeur du stand.
 
 Un échec de construction d'image arrête le déploiement sans lancer le job. Un job de déploiement déjà démarré depuis GitLab est suivi, sans être relancé. Pendant qu'un déploiement s'exécute, une fusion plus récente attend qu'il se termine. Le bouton **« Déployer main »** et `POST /api/projects/{id}/deploy` déploient la pointe actuelle de `main` à la demande du propriétaire. Il n'existe pas de restauration automatique ; c'est le job lui-même qui décide comment traiter une version en échec.
+
+## Planifications
+
+La page **« Planification »** d'un projet liste ses tâches récurrentes. Chaque planification comporte une ligne cron (`minute hour day month weekday`, par exemple `0 9 * * 1-5` ; `@hourly`, `@daily`, `@weekly` et `@monthly` fonctionnent aussi), un fuseau horaire, un interrupteur marche/arrêt, ses prochaines et dernières exécutions et le dernier résultat. Des préréglages prêts à l'emploi remplissent la ligne cron. Le propriétaire crée, modifie et supprime les planifications ; un opérateur peut aussi en lancer une immédiatement avec **« Lancer maintenant »**, sans modifier son horaire habituel.
+
+| Travail | Ce que fait une exécution |
+|---|---|
+| Test du stand | demande une exécution au [testeur du stand](#testeur-du-stand) ; ignorée tant que 8 bogues du stand sont ouverts |
+| Backlog en tâches | regroupe les notes ouvertes du backlog en tâches ; sans nouvelle note, rien ne se passe |
+| Fusionner main dans preprod | [synchronise `main` dans `preprod`](#resynchronisation-de-main-vers-preprod) |
+| Tâche | crée une tâche ordinaire avec le titre, la demande et la priorité enregistrés ; ignorée tant que la tâche de l'exécution précédente est ouverte |
+
+Un nouveau projet reçoit une synchronisation de main chaque heure et une exécution du backlog toutes les 4 heures ; la planification du testeur du stand apparaît lorsqu'une adresse de stand est définie. Les projets connectés plus tôt reçoivent une seule fois les mêmes planifications à partir de leurs anciens réglages d'intervalle. Après une panne de l'usine, les exécutions manquées d'une planification sont regroupées en une seule. `DARKFACTORY_TIMEZONE` définit le fuseau horaire par défaut (UTC) ; le formulaire propose celui du navigateur.
+
+API : `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
 
 ## API et données
 

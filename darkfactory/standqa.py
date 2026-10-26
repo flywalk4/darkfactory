@@ -236,10 +236,6 @@ def profile(project_config):
     }
 
 
-def interval_hours(project):
-    return max(0, min(int(config(project).get("qa_hours", INTERVAL_HOURS)), 168))
-
-
 def max_tasks(project):
     return max(1, min(int(config(project).get("qa_max_tasks", MAX_TASKS)), 10))
 
@@ -279,13 +275,7 @@ def to_verify(db, project):
 def due(db, project):
     if not stand(project):
         return False
-    current = state(project)
-    if current.get("requested"):
-        return True
-    hours = interval_hours(project)
-    if not hours or len(open_bugs(db, project)) >= MAX_OPEN:
-        return False
-    return now() - current.get("at", 0) >= hours * 3600
+    return bool(state(project).get("requested"))
 
 
 def fingerprint(title):

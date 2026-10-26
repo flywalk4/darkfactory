@@ -316,7 +316,7 @@ def expand_schema(conn):
 
 
 def initialize():
-    from . import auth_sessions, backlog, director, notifications  # noqa: F401  Register durable controllers before create_all.
+    from . import auth_sessions, backlog, director, notifications, schedules  # noqa: F401  Register durable controllers before create_all.
 
     ROOT.mkdir(parents=True, exist_ok=True)
     with engine.begin() as conn:

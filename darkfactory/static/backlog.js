@@ -4,8 +4,8 @@ const backlogTime=at=>at?new Date(at*1000).toLocaleString(LOCALE,{day:'numeric',
 function backlogSchedule(data,open){
   if(data.requested)return '<span class="backlog-status busy">'+tr('Агент группирует заметки в задачи…')+'</span>';
   if(!open)return '<span class="backlog-status">'+tr('Новых заметок нет')+'</span>';
-  if(!data.hours)return '<span class="backlog-status">'+tr('Автоматический перевод выключен — только по кнопке')+'</span>';
-  return `<span class="backlog-status">${tr('Автоматически')} ${data.next_at?tr('около {time}',{time:esc(backlogTime(data.next_at))}):tr('через {h} ч',{h:data.hours})} · ${tr('каждые {h} ч',{h:data.hours})}</span>`;
+  if(!data.cron)return '<span class="backlog-status">'+tr('Расписания нет — только по кнопке. Расписание настраивается на странице «Расписание».')+'</span>';
+  return `<span class="backlog-status">${tr('Автоматически')} ${data.next_at?tr('около {time}',{time:esc(backlogTime(data.next_at))}):''} · ${tr('по расписанию {cron}',{cron:esc(data.cron)})}</span>`;
 }
 async function backlogPage(){
   const root=$('#backlog-workspace');if(!projectId){root.innerHTML='<p>'+tr('Сначала подключи проект.')+'</p>';return;}

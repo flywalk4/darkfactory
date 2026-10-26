@@ -3,7 +3,7 @@ import json
 from conftest import connect
 from sqlalchemy import select
 
-from darkfactory import backlog, db
+from darkfactory import backlog, db, schedules
 
 
 class Groups:
@@ -65,33 +65,50 @@ def test_click_groups_related_notes_into_tasks(client, setup_project):
     assert client.post(f"/api/projects/{project['id']}/backlog/plan").status_code == 409
 
 
-def test_timer_plans_after_interval_and_failure_keeps_notes(client, setup_project, monkeypatch):
+def backlog_schedule(client, project):
+    items = client.get(f"/api/projects/{project['id']}/schedules").json()["items"]
+    return next(item for item in items if item["kind"] == "backlog")
+
+
+def make_due(schedule_id):
+    with db.transaction() as session:
+        session.get(schedules.Schedule, schedule_id).next_at = 1
+
+
+def test_schedule_plans_backlog_and_failure_keeps_notes(client, setup_project):
     project, pool = setup_project
     connect(client, pool)
+    schedule = backlog_schedule(client, project)
+    assert schedule["cron"] == "0 */4 * * *" and schedule["enabled"]
+    make_due(schedule["id"])
+    assert schedules.tick(force=True) == [schedule["id"]]
+    assert not backlog.plan(Groups(lambda _: {"groups": []}))  # No notes: the schedule asked for nothing.
+
     note = add(client, project, "Добавить сортировку")
-    later = backlog.now() + 4 * 3600 + 1
-    monkeypatch.setattr(backlog, "now", lambda: later)
+    assert client.get(f"/api/projects/{project['id']}/backlog").json()["next_at"]
+    make_due(schedule["id"])
+    schedules.tick(force=True)
     assert backlog.plan(Groups(lambda _: {"groups": "broken"}))
     view = client.get(f"/api/projects/{project['id']}/backlog").json()
     assert view["items"][0]["state"] == "open" and view["last_error"]
-    assert not backlog.plan(Groups(lambda _: {"groups": []}))  # Waits a full interval after the failure.
-    monkeypatch.setattr(backlog, "now", lambda: later + 4 * 3600)
+    assert not backlog.plan(Groups(lambda _: {"groups": []}))  # Waits for the next scheduled time.
+    client.post(f"/api/schedules/{schedule['id']}/run")
     assert backlog.plan(
         Groups(lambda _: {"groups": [{"title": "Сортировка", "request": "r", "items": [note]}]})
     )
     assert client.get(f"/api/projects/{project['id']}/backlog").json()["items"][0]["state"] == "planned"
 
 
-def test_manual_only_project_and_deleting_open_notes(client, setup_project, monkeypatch):
+def test_manual_only_project_and_deleting_open_notes(client, setup_project):
     project, pool = setup_project
     connect(client, pool)
-    response = client.put(f"/api/projects/{project['id']}", json={**project, "backlog_hours": 0})
-    assert response.status_code == 200, response.text
-    assert response.json()["backlog_hours"] == 0
+    schedule = backlog_schedule(client, project)
+    assert client.delete(f"/api/schedules/{schedule['id']}").status_code == 200
     note = add(client, project, "Когда-нибудь")
-    monkeypatch.setattr(backlog, "now", lambda: 10**10)
+    assert schedules.tick(force=True) == []
     assert not backlog.plan(Groups(lambda _: {"groups": []}))
-    assert client.get(f"/api/projects/{project['id']}/backlog").json()["next_at"] is None
+    view = client.get(f"/api/projects/{project['id']}/backlog").json()
+    assert view["next_at"] is None and view["cron"] is None
     assert client.delete(f"/api/projects/{project['id']}/backlog/{note}").json() == {"deleted": True}
     assert client.get(f"/api/projects/{project['id']}/backlog").json()["items"] == []
 

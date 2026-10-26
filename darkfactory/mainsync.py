@@ -17,31 +17,26 @@ _last = 0.0
 CHECK_EVERY = 60
 
 
-def interval():
-    """Seconds between syncs; 0 turns syncing off."""
-    return max(0, int(os.getenv("DARKFACTORY_MAIN_SYNC_SECONDS", "3600")))
-
-
-def due(project, period):
+def due(project, force=False):
+    """A project's schedule (or the button) asked for a sync; `force` syncs every project."""
     health = project.health or {}
     return (
         not project.incident_id
         and not service.remote_down(project)
-        and time.time() - health.get("main_sync_at", 0) >= period
+        and (force or bool(health.get("main_sync_requested")))
     )
 
 
 def sync(force=False):
-    """Merge main into preprod for every due project; a conflict becomes a task for the writer."""
+    """Merge main into preprod for every project that asked; a conflict becomes a task for the writer."""
     global _last
-    period = interval()
-    if not period or (not force and time.monotonic() - _last < CHECK_EVERY):
+    if os.getenv("DARKFACTORY_MAIN_SYNC_SECONDS") == "0" or (
+        not force and time.monotonic() - _last < CHECK_EVERY
+    ):
         return []
     _last = time.monotonic()
     with Session() as db:
-        projects = [
-            project for project in db.scalars(select(Project)) if due(project, 0 if force else period)
-        ]
+        projects = [project for project in db.scalars(select(Project)) if due(project, force)]
         db.expunge_all()
     return [(project.id, sync_project(project)) for project in projects]
 
@@ -56,7 +51,7 @@ def sync_project(project):
     with transaction() as db:
         current = db.get(Project, project.id)
         current.health = {
-            **(current.health or {}),
+            **{k: v for k, v in (current.health or {}).items() if k != "main_sync_requested"},
             "main_sync_at": time.time(),
             "main_sync": {key: result.get(key) for key in ("state", "main", "error")},
         }

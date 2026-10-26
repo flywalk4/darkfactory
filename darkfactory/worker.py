@@ -22,6 +22,7 @@ from . import (
     initialization,
     logs,
     mainsync,
+    schedules,
     service,
     standqa,
     toolchains,
@@ -1719,6 +1720,8 @@ def main():
     initialize()
     if upgraded := agents.upgrade_projects():
         log.info("Upgraded default skills and profiles of %d projects", len(upgraded))
+    if seeded := schedules.seed_all():
+        log.info("Turned project timers into %d schedules", seeded)
     # On SIGTERM stop taking work and let running steps finish; whatever outlives the grace
     # period is recovered by the next worker from the saved workspace and handoff.
     stopping = threading.Event()
@@ -1758,6 +1761,10 @@ def main():
                     worker.schedule_health()
                 except Exception:
                     log.exception("Scheduling preprod health failed")
+                try:
+                    schedules.tick()
+                except Exception:
+                    log.exception("Project schedules failed")
                 # Disk sweeps (rmtree, Docker prune) and main sync (fetch, push) take minutes at times;
                 # in the tick they stalled every claim and recovery meanwhile.
                 sweeping = periodic(sweeping, sweeps, cleanup.sweep)

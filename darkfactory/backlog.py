@@ -1,6 +1,5 @@
 """Backlog: loose owner notes that an agent groups by feature or area into ordinary tasks."""
 
-import json
 import logging
 import os
 import shutil
@@ -13,7 +12,7 @@ from sqlalchemy import Float, ForeignKey, String, Text, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from . import service
-from .db import ROOT, Base, Project, Task, decrypt, event, now, transaction, uid
+from .db import ROOT, Base, Project, Task, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
@@ -83,18 +82,12 @@ Respond with JSON only.
 """
 
 
-def interval_hours(project):
-    config = json.loads(decrypt(project.secret) or "{}")
-    value = config.get("backlog_hours", INTERVAL_HOURS)
-    return max(0, min(int(value), 168))
-
-
 def state(project):
     return dict((project.health or {}).get("backlog") or {})
 
 
 def request(db, project):
-    """Ask the worker to plan now; the click and the timer share one path."""
+    """Ask the worker to plan now; the click and the project schedule share one path."""
     project.health = {**(project.health or {}), "backlog": {**state(project), "requested": now()}}
 
 
@@ -103,17 +96,7 @@ def due(db, project):
         select(BacklogItem.id).where(BacklogItem.project_id == project.id, BacklogItem.state == "open")
     ):
         return False
-    current = state(project)
-    if current.get("requested"):
-        return True
-    hours = interval_hours(project)
-    # The timer counts from the oldest unplanned note, so a fresh backlog is not planned on its first minute.
-    oldest = db.scalar(
-        select(BacklogItem.created)
-        .where(BacklogItem.project_id == project.id, BacklogItem.state == "open")
-        .order_by(BacklogItem.created)
-    )
-    return bool(hours) and now() - max(oldest, current.get("at", 0)) >= hours * 3600
+    return bool(state(project).get("requested"))
 
 
 def overview(project):

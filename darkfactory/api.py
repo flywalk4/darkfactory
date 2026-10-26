@@ -19,6 +19,7 @@ from .db import (
 )
 from .routes import artifacts, chat, connections, members, notifications, pools, projects, tasks
 from .routes import backlog as backlog_routes
+from .routes import schedules as schedule_routes
 from .routes.connections import check_credentials, unique_credentials  # noqa: F401  (auth_sessions)
 from .web import access, agent_activity, public  # noqa: F401
 
@@ -108,6 +109,7 @@ def executor_capabilities(a=Depends(access)):
 
 app.include_router(projects.router)
 app.include_router(backlog_routes.router)
+app.include_router(schedule_routes.router)
 app.include_router(chat.router)
 app.include_router(tasks.router)
 app.include_router(artifacts.router)

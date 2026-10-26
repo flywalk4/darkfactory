@@ -56,6 +56,7 @@ Por padrão, a tarefa vai direto para um único desenvolvedor, sem plano e sem s
 - [Verificações da implementação](#verificações-da-implementação)
 - [Testes de UI no navegador](#testes-de-ui-no-navegador)
 - [Testes do stand e deploys no GitLab](#testes-do-stand-e-deploys-no-gitlab)
+- [Agendamentos](#agendamentos)
 - [API e dados](#api-e-dados)
 - [Idiomas da interface](#idiomas-da-interface)
 - [Licença](#licença)
@@ -427,7 +428,7 @@ Quando uma tarefa de nível superior é concluída, a notificação também cont
 
 ### Sincronização de main de volta para preprod
 
-A direção inversa é automática: uma vez por hora (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` desativa), a fábrica mescla os novos commits do `main` em `preprod`, por exemplo os hotfixes do proprietário. Se o `preprod` não avançou, ele simplesmente alcança o `main`; caso contrário, um commit de merge é criado. Em caso de conflito, surge uma tarefa "Merge main into preprod: conflict" com o merge iniciado e os marcadores na pasta de trabalho; o agente resolve o conflito, e depois disso a tarefa passa pela revisão e pelas verificações normais.
+A direção inversa é automática: no [agendamento](#agendamentos) do projeto **"Mesclar main no preprod"** (uma vez por hora por padrão; `DARKFACTORY_MAIN_SYNC_SECONDS=0` desativa a sincronização para toda a instalação), a fábrica mescla os novos commits do `main` em `preprod`, por exemplo os hotfixes do proprietário. Se o `preprod` não avançou, ele simplesmente alcança o `main`; caso contrário, um commit de merge é criado. Em caso de conflito, surge uma tarefa "Merge main into preprod: conflict" com o merge iniciado e os marcadores na pasta de trabalho; o agente resolve o conflito, e depois disso a tarefa passa pela revisão e pelas verificações normais.
 
 ## Limites e incidentes
 
@@ -498,9 +499,9 @@ A fábrica pode testar por conta própria a aplicação implantada e fazer o dep
 
 Em **"Endereço do stand"**, informe a página que o testador abre primeiro, por exemplo o Studio do stand. Em **"Outros endereços do stand"**, liste no formato `host:port`, um por linha, os demais hosts que o stand chama (servidor de autenticação, API). Endereços internos são permitidos aqui: o dono os escolhe da mesma forma que escolhe hosts permitidos. Coloque as contas de teste nas variáveis de teste (`E2E_USER`, `E2E_PASSWORD` etc.); o testador as lê do próprio ambiente, e os valores nunca chegam ao prompt nem à transcrição.
 
-A cada **N horas** (`qa_hours`, 4 por padrão, `0` desliga o temporizador), após cada deploy bem-sucedido e ao clicar em **"Testar o stand"**, um agente abre o stand no Chromium (Playwright MCP) e atua como um testador manual: faz login, percorre os fluxos principais, formulários, as duas viewports, erros do console e requisições com falha. O código do preprod é montado somente para leitura, para que o agente possa apontar os arquivos prováveis. O navegador só alcança os hosts do stand, pelo proxy de saída da tarefa; erros de certificado de uma CA interna são ignorados para essas origens.
+No [agendamento](#agendamentos) **"Teste do stand"** do projeto (a cada 4 horas por padrão; criado quando o endereço do stand é definido), após cada deploy bem-sucedido e ao clicar em **"Testar o stand"**, um agente abre o stand no Chromium (Playwright MCP) e atua como um testador manual: faz login, percorre os fluxos principais, formulários, as duas viewports, erros do console e requisições com falha. O código do preprod é montado somente para leitura, para que o agente possa apontar os arquivos prováveis. O navegador só alcança os hosts do stand, pelo proxy de saída da tarefa; erros de certificado de uma CA interna são ignorados para essas origens.
 
-Cada defeito que o agente reproduz duas vezes vira uma tarefa de correção comum, com os passos, o resultado esperado e o obtido, e as capturas de tela anexadas. No máximo `qa_max_tasks` tarefas por execução (3 por padrão); bugs abertos do stand são passados à execução seguinte para não serem reportados de novo, e o temporizador pausa enquanto houver 8 deles abertos. O agente cria apenas os próprios dados, com o prefixo `df-qa-`, e nunca altera usuários ou configurações. Depois de um deploy, ele primeiro reverifica os bugs do stand cujas correções foram publicadas: uma correção confirmada é marcada na tarefa, e um bug que ainda se reproduz recebe uma nova tarefa relacionada.
+Cada defeito que o agente reproduz duas vezes vira uma tarefa de correção comum, com os passos, o resultado esperado e o obtido, e as capturas de tela anexadas. No máximo `qa_max_tasks` tarefas por execução (3 por padrão); bugs abertos do stand são passados à execução seguinte para não serem reportados de novo, e as execuções agendadas são ignoradas enquanto houver 8 deles abertos. O agente cria apenas os próprios dados, com o prefixo `df-qa-`, e nunca altera usuários ou configurações. Depois de um deploy, ele primeiro reverifica os bugs do stand cujas correções foram publicadas: uma correção confirmada é marcada na tarefa, e um bug que ainda se reproduz recebe uma nova tarefa relacionada.
 
 Notificações: `qa_reported` e `qa_not_fixed`. API: `POST /api/projects/{id}/qa` inicia uma execução agora. A execução usa o pool de escritores do projeto e dura no máximo `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` desativa os testes do stand em toda a instalação.
 
@@ -515,6 +516,21 @@ Para um projeto do GitLab, informe em **"Job de deploy do GitLab"** o nome de um
 5. após um deploy bem-sucedido, inicia o testador do stand.
 
 Uma falha na construção da imagem interrompe o deploy sem executar o job. Um job de deploy já iniciado pelo GitLab é acompanhado, não iniciado de novo. Enquanto um deploy roda, um merge mais recente aguarda até ele terminar. O botão **"Fazer deploy da main"** e `POST /api/projects/{id}/deploy` implantam a ponta atual de `main` a pedido do dono. Não há rollback automático; o próprio job decide como tratar uma versão com falha.
+
+## Agendamentos
+
+A página **"Agendamento"** de um projeto lista seus trabalhos recorrentes. Cada agendamento tem uma linha cron (`minute hour day month weekday`, por exemplo `0 9 * * 1-5`; `@hourly`, `@daily`, `@weekly` e `@monthly` também funcionam), um fuso horário, um interruptor liga/desliga, a próxima e a última execução e o último resultado. Predefinições prontas preenchem a linha cron. O proprietário cria, altera e exclui agendamentos; um operador também pode iniciar um deles imediatamente com **"Executar agora"**, o que não altera o horário regular.
+
+| Trabalho | O que uma execução faz |
+|---|---|
+| Teste do stand | pede uma execução ao [testador do stand](#testador-do-stand); é ignorado enquanto houver 8 bugs do stand abertos |
+| Backlog em tarefas | agrupa as notas abertas do backlog em tarefas; sem notas novas, nada acontece |
+| Mesclar main no preprod | [sincroniza o `main` no `preprod`](#sincronização-de-main-de-volta-para-preprod) |
+| Tarefa | cria uma tarefa comum com o título, o pedido e a prioridade salvos; é ignorada enquanto a tarefa da execução anterior estiver aberta |
+
+Um projeto novo recebe uma sincronização do main a cada hora e uma execução do backlog a cada 4 horas; o agendamento do testador do stand aparece quando um endereço do stand é definido. Projetos conectados antes recebem, uma única vez, os mesmos agendamentos a partir das antigas configurações de intervalo. Depois de uma queda da fábrica, as execuções perdidas de um agendamento se reduzem a uma. `DARKFACTORY_TIMEZONE` define o fuso horário padrão (UTC); o formulário oferece o do navegador.
+
+API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
 
 ## API e dados
 
