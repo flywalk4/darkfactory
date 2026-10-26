@@ -17,6 +17,7 @@ from .. import (
     backlog,
     environment,
     initialization,
+    mainsync,
     service,
     toolchains,
 )
@@ -404,6 +405,21 @@ def prepare_environment(project_id: str, a=Depends(access)):
     with transaction() as db:
         project = a.project(db, project_id)
         return public(environment.queue(db, project, a.principal.id))
+
+
+@router.post("/api/projects/{project_id}/main-sync")
+def sync_main(project_id: str, a=Depends(access)):
+    """Pull main into preprod now instead of waiting for the hourly round; main itself never changes."""
+    a.require("operator")
+    with Session() as db:
+        project = a.project(db, project_id)
+        if project.target != "preprod":
+            raise HTTPException(409, "Синхронизация main работает только для проекта с веткой preprod")
+        if project.incident_id:
+            raise HTTPException(409, "Сначала нужно исправить инцидент preprod")
+        db.expunge(project)
+    result = mainsync.sync_project(project)
+    return {key: result.get(key) for key in ("state", "main", "preprod", "conflicts", "task_id", "error")}
 
 
 @router.get("/api/projects/{project_id}/environment")

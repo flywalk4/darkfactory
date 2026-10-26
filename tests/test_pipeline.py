@@ -322,7 +322,7 @@ def test_quick_task_and_leaf_subtask_skip_planning(client, setup_project, tmp_pa
 
 
 def test_main_reaches_preprod_and_conflicts_become_a_task(client, setup_project, tmp_path):
-    from darkfactory import mainsync
+    from darkfactory import director, mainsync
 
     project, pool = setup_project
     remote = seed(tmp_path)
@@ -348,7 +348,15 @@ def test_main_reaches_preprod_and_conflicts_become_a_task(client, setup_project,
     git(clone, "checkout", "-q", "-b", "preprod", "origin/preprod")
     # Hotfix straight to main: preprod has nothing of its own, so it simply moves forward.
     commit("main", "hotfix.py", "FIX = 1\n")
-    assert run()["state"] == "merged"
+    # The director pulls main on request, without waiting for the hourly round.
+    synced = client.post(f"/api/projects/{project['id']}/main-sync")
+    assert synced.status_code == 200 and synced.json()["state"] == "merged", synced.text
+    assert (
+        director.validate_action(
+            director.Action(method="POST", path=f"/api/projects/{project['id']}/main-sync", body_json="{}")
+        )
+        == {}
+    )
     assert git(remote, "rev-parse", "preprod") == git(remote, "rev-parse", "main")
     assert run()["state"] == "up_to_date"
     # Both branches moved: a merge commit keeps preprod's own work.

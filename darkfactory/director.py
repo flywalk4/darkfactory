@@ -208,7 +208,7 @@ def validate_action(action):
         raise ValueError("Эта операция требует формы доступа")
     allowed = {
         "GET": r"/(me|executors|projects|pools|connections|members|notification-events|notification-channels|notification-deliveries|login-sessions|projects/[a-z0-9]+/(agents|agent-catalog|tasks|director-journal|backlog|metrics)|tasks/[a-z0-9]+|login-sessions/[a-z0-9]+)",
-        "POST": r"/(projects|pools|notification-channels|login-sessions|projects/[a-z0-9]+/(tasks|incidents)|tasks/[a-z0-9]+/(actions|links)|login-sessions/[a-z0-9]+/cancel)",
+        "POST": r"/(projects|pools|notification-channels|login-sessions|projects/[a-z0-9]+/(tasks|incidents|main-sync)|tasks/[a-z0-9]+/(actions|links)|login-sessions/[a-z0-9]+/cancel)",
         "PUT": r"/(organization|projects/[a-z0-9]+|projects/[a-z0-9]+/agents|tasks/[a-z0-9]+/priority|pools/[a-z0-9]+|notification-channels/[a-z0-9]+)",
         "DELETE": r"/(pools/[a-z0-9]+|tasks/[a-z0-9]+/links/[a-z0-9]+)",
     }
@@ -396,6 +396,8 @@ def prompt(state):
         "director-journal — твои же решения по остановленным задачам; open:true ждёт ответа владельца. Когда "
         "владелец отвечает про такую задачу, продолжи её через POST tasks/{id}/actions "
         '{"action":"resume","message":"<его указание>"} или отмени по его слову. '
+        "Подтянуть свежий main в preprod (хотфиксы, коммиты владельца): POST projects/{id}/main-sync с телом {}; "
+        "state merged — влито, up_to_date — уже актуально, conflict — создана задача на разрешение (task_id). "
         "Не меняй лимиты, права, платный API или состояние задач без прямого поручения. Никаких production-деплоев "
         "или merge в main. Если запрос неоднозначен, задай один вопрос и верни actions:[]. "
         "Без подходящей модели или доступа объясни ограничение. В конце сообщи фактические результаты.\n"
