@@ -233,3 +233,26 @@ def test_failed_install_or_missing_tool_retries_before_an_incident(setup_project
             # The failure keeps repeating: only then is it worth an agent's time.
             assert check.incident == (attempt == Worker.ENVIRONMENT_PATIENCE)
             assert (row.incident_id is not None) == (attempt == Worker.ENVIRONMENT_PATIENCE)
+
+
+def test_removed_local_repository_stops_checks_and_syncs(client, setup_project, tmp_path, monkeypatch):
+    from darkfactory import mainsync
+
+    project, pool = setup_project
+    remote = seed(tmp_path)
+    connect(client, pool)
+    with db.transaction() as session:
+        session.get(db.Project, project["id"]).remote = str(remote)
+    worker = Worker(DeterministicExecutor())
+    assert drive(worker, make_task(client, project)["id"]).state == "merged"
+
+    # The repository is deleted from /repos: no preprod check every five minutes, no main sync.
+    gone = "/repos/removed-" + project["id"] + ".git"
+    with db.transaction() as session:
+        row = session.get(db.Project, project["id"])
+        row.remote, row.health = gone, {**row.health, "scheduled_at": 0, "main_sync_requested": 1}
+    worker.schedule_health()
+    with db.Session() as session:
+        checks = session.query(db.Task).filter_by(project_id=project["id"], system_check=True).count()
+    assert checks == 0
+    assert mainsync.sync(force=True) == []

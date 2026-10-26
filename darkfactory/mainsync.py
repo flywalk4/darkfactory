@@ -23,6 +23,7 @@ def due(project, force=False):
     return (
         not project.incident_id
         and not service.remote_down(project)
+        and not service.repository_missing(project)
         and (force or bool(health.get("main_sync_requested")))
     )
 

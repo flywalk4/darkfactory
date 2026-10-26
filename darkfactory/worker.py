@@ -611,6 +611,7 @@ class Worker:
                     not project.checks
                     or project.incident_id
                     or service.remote_down(project)
+                    or service.repository_missing(project)
                     or now() - (project.health or {}).get("scheduled_at", 0) < interval
                 ):
                     continue
@@ -678,7 +679,9 @@ class Worker:
     REMOTE_FAILURE = re.compile(
         r"unable to access '|Failed to connect to|Could not connect to server|Could not resolve host|"
         r"Connection timed out|Connection refused|Network is unreachable|No route to host|"
-        r"Could not read from remote repository|RPC failed|early EOF"
+        r"Could not read from remote repository|RPC failed|early EOF|"
+        # The repository itself is gone (deleted /repos path, removed project): back off like an outage.
+        r"repository '[^']*' does not exist|does not appear to be a git repository|Repository not found"
     )
 
     def remote_unreachable(self, db, task, project, message):

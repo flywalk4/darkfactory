@@ -569,6 +569,11 @@ def remote_down(project):
     return (project.health or {}).get("remote_down_until", 0) > now()
 
 
+def repository_missing(project):
+    """A local repository removed from /repos: no check or sync of it can succeed until it is back."""
+    return project.remote.startswith("/repos/") and not os.path.isdir(project.remote)
+
+
 HOLD = ROOT / "system" / "hold"
 
 
