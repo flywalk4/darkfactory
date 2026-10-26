@@ -60,7 +60,7 @@ def test_owner_manages_schedules_and_a_task_schedule_creates_one_task_at_a_time(
     project, pool = setup_project
     connect(client, pool)
     seeded = client.get(f"/api/projects/{project['id']}/schedules").json()
-    assert sorted(item["kind"] for item in seeded["items"]) == ["backlog", "main_sync"]
+    assert sorted(item["kind"] for item in seeded["items"]) == ["backlog", "lessons", "main_sync"]
 
     base = f"/api/projects/{project['id']}/schedules"
     assert (

@@ -553,6 +553,10 @@ class DockerExecutor:
 
             if guide := project_guide(project.id):
                 profile = {**profile, "skill_definitions": [*profile["skill_definitions"], guide]}
+            from .lessons import skill as project_lessons
+
+            if rules := project_lessons(ROOT / "workspaces" / task.id):
+                profile = {**profile, "skill_definitions": [*profile["skill_definitions"], rules]}
         if role == "qa":
             from .standqa import profile as tester
 

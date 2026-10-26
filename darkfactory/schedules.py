@@ -20,12 +20,13 @@ from .db import Base, Project, Task, decrypt, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
-KINDS = ("stand_qa", "backlog", "main_sync", "auto_promote", "task")
+KINDS = ("stand_qa", "backlog", "main_sync", "auto_promote", "lessons", "task")
 TITLES = {
     "stand_qa": "Тестирование стенда",
     "backlog": "Бэклог в задачи",
     "main_sync": "Влить main в preprod",
     "auto_promote": "Автоперенос preprod в main",
+    "lessons": "Уроки проекта",
     "task": "Задача",
 }
 CLOSED = {"merged", "cancelled", "duplicate", "checked"}
@@ -36,6 +37,7 @@ QUEUED = {
     "main_sync": "Синхронизация main поставлена в очередь",
     "auto_promote": "Проверка автопереноса в main поставлена в очередь",
 }
+LESSONS_CRON = "0 6 * * 1"
 CHECK_EVERY = 30
 # Field ranges of a five-field cron line: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
 FIELDS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
@@ -173,12 +175,23 @@ def seed(db, project):
     if config.get("stand_url") and (cron := hours_to_cron(config.get("qa_hours", 4))):
         made.append(create(db, project, "stand_qa", cron))
     project.health = {**(project.health or {}), "schedules_seeded": True}
+    return made + seed_lessons(db, project)
+
+
+def seed_lessons(db, project):
+    """The weekly lessons schedule, once per project: new ones get it with the others, older ones on upgrade."""
+    if (project.health or {}).get("lessons_seeded"):
+        return []
+    made = [create(db, project, "lessons", LESSONS_CRON)]
+    project.health = {**(project.health or {}), "lessons_seeded": True}
     return made
 
 
 def seed_all():
     with transaction() as db:
-        return sum(len(seed(db, project)) for project in db.scalars(select(Project)))
+        return sum(
+            len(seed(db, project)) + len(seed_lessons(db, project)) for project in db.scalars(select(Project))
+        )
 
 
 def stand_added(db, project):
@@ -219,6 +232,14 @@ def fire(db, schedule):
     if schedule.kind == "main_sync":
         project.health = {**(project.health or {}), "main_sync_requested": now()}
         return QUEUED["main_sync"]
+    if schedule.kind == "lessons":
+        from . import lessons
+
+        task, result = lessons.queue(db, project, schedule.id)
+        if task:
+            event(db, task, "scheduled", f"Создана по расписанию «{schedule.title}» ({schedule.cron})")
+            schedule.last_task_id = task.id
+        return result
     previous = db.get(Task, schedule.last_task_id or "")
     if previous and previous.state not in CLOSED:
         return f"Пропущено: прошлая задача {previous.id} ещё не закончена"

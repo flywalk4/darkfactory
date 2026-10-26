@@ -540,11 +540,18 @@ The **"Schedules"** page of a project lists its recurring jobs. Each schedule ha
 | Stand testing | asks the [stand tester](#stand-tester) for a run; skipped while 8 stand bugs are open |
 | Backlog into tasks | groups the open backlog notes into tasks; nothing happens without new notes |
 | Merge main into preprod | [syncs `main` into `preprod`](#syncing-main-back-into-preprod) |
+| Project lessons | turns the collected [lessons](#project-lessons) into one task "Update project rules"; nothing happens without new cases, skipped while that task is open |
 | Task | creates an ordinary task with the saved title, request and priority; skipped while the task of the previous run is still open |
 
-A new project gets an hourly main sync and a backlog run every 4 hours; the stand tester schedule appears when a stand address is set. Projects connected earlier get the same schedules from their old interval settings once. After a factory outage the missed runs of a schedule collapse into one. `DARKFACTORY_TIMEZONE` sets the default time zone (UTC); the form offers the browser's.
+A new project gets an hourly main sync, a backlog run every 4 hours and a weekly lessons run (Mondays 06:00); the stand tester schedule appears when a stand address is set. Projects connected earlier get the same schedules from their old interval settings once, and the weekly lessons schedule once on the first factory start after the upgrade. After a factory outage the missed runs of a schedule collapse into one. `DARKFACTORY_TIMEZONE` sets the default time zone (UTC); the form offers the browser's.
 
 API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
+
+### Project lessons
+
+Mistakes agents stumbled on become short project rules. When a task merges into preprod after review returns (its first review findings are kept), a repeated review finding, a Director stop, or when it came from the stand tester, the factory keeps a short case in the project (the last 50). The **"Project lessons"** schedule (`lessons`, weekly by default) makes one task "Обновить правила проекта" listing the cases and then clears them; a second one is not created while the first is open. The agent extends and compacts `docs/darkfactory/LESSONS.md`: at most 60 lines, one rule per line ("do / don't — why"), duplicates and outdated rules removed. The task may change only that file: the writer's result and the merge are refused otherwise.
+
+The file is not inlined into prompts. Agents of the plan, writer and review stages get it as the `project-lessons` skill: the prompt carries only its name, a one-line description and the path, and the full text is written to the agent's skill directory.
 
 ## API and data
 

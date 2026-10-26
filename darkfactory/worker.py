@@ -21,6 +21,7 @@ from . import (
     disk,
     environment,
     initialization,
+    lessons,
     logs,
     mainsync,
     promotions,
@@ -531,6 +532,7 @@ def accept_merge(db, task):
         # The merge fast-forwarded a checked preprod to a checked candidate: the new head is known healthy,
         # so the monitor does not re-run every check on it. The periodic full re-check keeps its schedule.
         project.health = {**health, "sha": task.result_sha}
+    lessons.record(db, task, project)
     # Factory bookkeeping (index, environment) rides to main with the next real change.
     root = (
         not task.system_check
@@ -1114,6 +1116,8 @@ class Worker:
                             initialization.validate(repo)
                         if environment.active(task):
                             environment.validate(repo)
+                        if lessons.active(task):
+                            lessons.validate(repo)
                     except (ValueError, UnicodeError) as exc:
                         result = {"status": "checks_failed", "text": str(exc)}
                     else:
@@ -1183,6 +1187,8 @@ class Worker:
                     raise RuntimeError("Acceptance evidence does not match the candidate commit")
                 if initialization.active(task) and not (task.role_config or {}).get("merge_approved"):
                     initialization.only_documents(repo, task.target_sha, task.candidate_sha)
+                if lessons.active(task):
+                    lessons.only_lessons(repo, task.target_sha, task.candidate_sha)
                 if task.dependency_commits:
                     # Accepted inputs are checked right before the merge. The push itself runs outside the
                     # transaction: it holds the global lock, and a slow remote would expire every lease.
