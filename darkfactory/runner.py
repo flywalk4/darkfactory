@@ -1459,7 +1459,9 @@ def claude(job, upstream=None):
         args += ["--max-turns", turns]
     if job.get("output_schema") or job["role"] in {"review", "plan"}:
         schema = job.get("output_schema") or (REVIEW_SCHEMA if job["role"] == "review" else PLAN_SCHEMA)
-        args += ["--json-schema", json.dumps(schema), "--tools", "Read,Glob,Grep"]
+        # The stand tester reads its sign-in from the environment with a shell; its workspace is read-only.
+        tools = "Read,Glob,Grep,Bash" if job["role"] == "qa" else "Read,Glob,Grep"
+        args += ["--json-schema", json.dumps(schema), "--tools", tools]
     Path("/tmp/claude").mkdir(parents=True, exist_ok=True)
     hand_over("/tmp/claude")
     prompt, images = job["prompt"], job.get("images", [])
