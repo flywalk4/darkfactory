@@ -18,6 +18,7 @@ fi
 cd "$DARKFACTORY_UPDATE_ROOT"
 trap 'rm -f "$0"' EXIT
 
+REMOTE=${DARKFACTORY_UPDATE_REMOTE:-origin}
 BRANCH=${DARKFACTORY_UPDATE_BRANCH:-main}
 HEALTH_SECONDS=${DARKFACTORY_UPDATE_HEALTH_SECONDS:-600}
 VOLUME=${DATA_VOLUME:-darkfactory_data}
@@ -43,9 +44,17 @@ os.replace(path + ".tmp", path)
 EOF
 }
 
+build() {
+    # Docker Hub times out now and then; a network hiccup is not a bad version.
+    for attempt in 1 2 3; do
+        docker compose build -q app worker executor-image >>"$LOG" 2>&1 && return 0
+        sleep 30
+    done
+    return 1
+}
+
 deploy() {
-    docker compose build -q app executor-image >>"$LOG" 2>&1 &&
-        docker compose up -d --no-deps app >>"$LOG" 2>&1 &&
+    docker compose up -d --no-deps app >>"$LOG" 2>&1 &&
         sh scripts/deploy-worker.sh >>"$LOG" 2>&1
 }
 
@@ -73,9 +82,9 @@ healthy() {
     return 1
 }
 
-git fetch -q origin "$BRANCH"
+git fetch -q "$REMOTE" "$BRANCH"
 current=$(git rev-parse HEAD)
-target=$(git rev-parse "origin/$BRANCH")
+target=$(git rev-parse FETCH_HEAD)
 [ "$current" = "$target" ] && exit 0
 if grep -qx "$target" "$BAD"; then
     exit 0
@@ -90,6 +99,13 @@ status updating "$target" "$current" "Building and starting the new version"
 touch "$SYSTEM/hold"
 started=$(date +%s)
 git merge -q --ff-only "$target"
+if ! build; then
+    # Nothing was restarted: go back to the running version's sources and try again next round.
+    git reset -q --hard "$current"
+    rm -f "$SYSTEM/hold"
+    status failed "$target" "$current" "Build failed (retried); the running version is untouched. $(tail -n 20 "$LOG")"
+    exit 1
+fi
 if deploy && rm -f "$SYSTEM/hold" && healthy "$started"; then
     status updated "$target" "$current" "Healthy after the update"
     echo "$(date -Is) healthy at $target" >>"$LOG"
@@ -102,7 +118,7 @@ reason=$(tail -n 30 "$LOG")
 touch "$SYSTEM/hold"
 git reset -q --hard "$current"
 started=$(date +%s)
-if deploy && rm -f "$SYSTEM/hold" && healthy "$started"; then
+if build && deploy && rm -f "$SYSTEM/hold" && healthy "$started"; then
     status rolled_back "$target" "$current" "The new version was unhealthy; back on the previous one. $reason"
 else
     rm -f "$SYSTEM/hold"
