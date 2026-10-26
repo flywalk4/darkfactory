@@ -58,6 +58,7 @@ def project_settings(row):
         return copy.deepcopy(cached[2])
     config = json.loads(decrypt(row.secret) or "{}")
     value = dict(
+        factory_self=config.get("factory_self", False),
         executor_image=config.get("executor_image"),
         allowed_hosts=config.get("allowed_hosts", []),
         allow_paid_fallback=config.get("allow_paid_fallback", False),

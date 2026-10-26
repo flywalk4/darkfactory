@@ -104,6 +104,7 @@ class ProjectInput(BaseModel):
     ssh_known_hosts: str = ""
     executor_image: str | None = Field(default=None, max_length=250)
     allowed_hosts: list[str] | None = Field(default=None, max_length=50)
+    factory_self: bool = False
     allow_paid_fallback: bool = False
     package_registries: bool = True
     merge_without_checks: bool = True
@@ -126,6 +127,7 @@ class ProjectInput(BaseModel):
 
 
 PROJECT_SECRETS = {
+    "factory_self",
     "allow_paid_fallback",
     "package_registries",
     "merge_without_checks",
