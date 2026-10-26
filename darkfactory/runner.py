@@ -120,7 +120,7 @@ PLAN_SCHEMA = {
                     "request": {"type": "string", "minLength": 1, "maxLength": 20000},
                     "acceptance": {"type": "string", "minLength": 1, "maxLength": 12000},
                     "agent_profile": {"type": ["string", "null"]},
-                    "tier": {"type": ["string", "null"], "enum": ["light", "standard", None]},
+                    "tier": {"type": ["string", "null"], "enum": ["light", "standard", "heavy", None]},
                     "files": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 300}},
                     "depends_on": {
                         "type": "array",
@@ -175,7 +175,7 @@ def plan_object(text, allow_subtasks=True):
             or not isinstance(subtask.get("files", []), list)
             or len(subtask.get("files", [])) > 20
             or not all(isinstance(path, str) and 0 < len(path) <= 300 for path in subtask.get("files", []))
-            or subtask.get("tier") not in (None, "light", "standard")
+            or subtask.get("tier") not in (None, "light", "standard", "heavy")
             or (
                 subtask.get("agent_profile") is not None
                 and (
