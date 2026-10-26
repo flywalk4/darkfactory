@@ -160,6 +160,61 @@ def load_images(dialogue_id):
     ]
 
 
+TEXT_TYPES = {"text/plain": ".txt", "application/json": ".json"}
+TEXT_BYTES = 200 * 1024
+
+
+def file_dir(dialogue_id):
+    return ROOT / "director-files" / dialogue_id
+
+
+def save_files(dialogue_id, files):
+    """Store attached .txt/.json beside the dialogue; text must be UTF-8 and JSON must parse."""
+    decoded = []
+    for file in files:
+        try:
+            data = base64.b64decode(file.data, validate=True)
+            text = data.decode("utf-8")
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, f"Файл {file.name} повреждён или не в UTF-8") from None
+        if len(data) > TEXT_BYTES:
+            raise HTTPException(422, f"Файл {file.name} больше 200 КБ")
+        if file.media_type == "application/json":
+            try:
+                json.loads(text)
+            except ValueError:
+                raise HTTPException(422, f"Файл {file.name} не является JSON") from None
+        stem = (
+            re.sub(r"[^\w.\-]+", "_", file.name.rsplit("/", 1)[-1])
+            .strip("._")
+            .removesuffix(TEXT_TYPES[file.media_type])
+        )
+        decoded.append((f"{stem[:100] or 'file'}{TEXT_TYPES[file.media_type]}", data))
+    if decoded:
+        file_dir(dialogue_id).mkdir(parents=True, exist_ok=True)
+    for index, (name, data) in enumerate(decoded):
+        (file_dir(dialogue_id) / f"{index:02d}-{name}").write_bytes(data)
+
+
+def text_files(dialogue_id):
+    try:
+        files = sorted(file_dir(dialogue_id).iterdir(), key=lambda path: path.name)
+    except OSError:
+        return []
+    return [
+        path
+        for path in files
+        if path.is_file() and not path.is_symlink() and path.suffix in TEXT_TYPES.values()
+    ]
+
+
+def load_files(dialogue_id):
+    return [
+        {"name": path.name[3:], "content": path.read_text(errors="replace")}
+        for path in text_files(dialogue_id)
+    ]
+
+
 def scrub(value):
     if isinstance(value, dict):
         return {key: scrub(item) for key, item in value.items() if key not in FORBIDDEN_KEYS}
@@ -177,6 +232,8 @@ def messages(rows):
             result[-1]["images"] = [
                 f"/api/config-chat/messages/{row.id}/images/{index}" for index in range(len(images))
             ]
+        if files := text_files(row.id):
+            result[-1]["files"] = [path.name[3:] for path in files]
         if row.reply or row.status in ACTIVE:
             result.append(
                 {
@@ -540,6 +597,9 @@ def advance_dialogues(executor=None):
                 state["mcp_servers"] = director_mcp
             if images := load_images(identifier):
                 state["attached_images"] = f"К текущему сообщению приложено картинок: {len(images)}"
+            if files := load_files(identifier):
+                # Owner-supplied data, not instructions: the prompt treats the whole state as context.
+                state["attached_files"] = files
             receipts = []
             deadline = time.monotonic() + 480
             for _ in range(6):

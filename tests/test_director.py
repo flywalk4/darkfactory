@@ -502,6 +502,37 @@ def test_director_receives_pasted_images_and_serves_them_to_owner(client, setup_
     assert runner.data_url(job["images"][0]) == "data:image/png;base64," + png
 
 
+def test_director_receives_text_and_json_files(client, setup_project):
+    import base64
+
+    project, pool = setup_project
+    connect(client, pool)
+
+    def encoded(text):
+        return base64.b64encode(text.encode()).decode()
+
+    bad_json = {"name": "x.json", "media_type": "application/json", "data": encoded("{oops")}
+    assert client.post("/api/config-chat", json={"files": [bad_json]}).status_code == 422
+    not_utf8 = {"name": "x.txt", "media_type": "text/plain", "data": base64.b64encode(b"\xff\xfe").decode()}
+    assert client.post("/api/config-chat", json={"files": [not_utf8]}).status_code == 422
+    binary = {"name": "x.pdf", "media_type": "application/pdf", "data": encoded("%PDF")}
+    assert client.post("/api/config-chat", json={"files": [binary]}).status_code == 422
+    files = [
+        {"name": "../notes.txt", "media_type": "text/plain", "data": encoded("Шаги воспроизведения")},
+        {"name": "config.json", "media_type": "application/json", "data": encoded('{"retries": 3}')},
+    ]
+    response = client.post("/api/config-chat", json={"files": files})
+    assert response.status_code == 202, response.text
+    identifier = response.json()["id"]
+    model = Model({"reply": "Прочитал файлы", "actions": []})
+    director.advance_dialogues(model)
+    assert "Шаги воспроизведения" in model.prompts[0] and "retries" in model.prompts[0]
+    assert "notes.txt" in model.prompts[0] and "config.json" in model.prompts[0]
+    message = client.get("/api/config-chat").json()["messages"][0]
+    assert message["id"] == identifier + "-user" and message["files"] == ["notes.txt", "config.json"]
+    assert message["content"] == "(см. файл)"
+
+
 def test_director_cannot_change_roles_commands_or_destinations(client, setup_project):
     project, _ = setup_project
     for method, path in [

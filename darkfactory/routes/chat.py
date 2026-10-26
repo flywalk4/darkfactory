@@ -17,6 +17,7 @@ from ..director import ChatThread, Dialogue
 from ..director import image_files as dialogue_image_files
 from ..director import messages as dialogue_messages
 from ..director import release as release_dialogue
+from ..director import save_files as save_dialogue_files
 from ..director import save_images as save_dialogue_images
 from ..web import access
 
@@ -28,16 +29,23 @@ class ChatImage(BaseModel):
     data: str = Field(min_length=1, max_length=7_000_000)
 
 
+class ChatFile(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    media_type: str = Field(pattern="^(text/plain|application/json)$")
+    data: str = Field(min_length=1, max_length=300_000)
+
+
 class ChatInput(BaseModel):
     message: str = Field(default="", max_length=12000)
     project_id: str | None = None
     thread_id: str | None = None
     images: list[ChatImage] = Field(default_factory=list, max_length=4)
+    files: list[ChatFile] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def not_empty(self):
-        if not self.message.strip() and not self.images:
-            raise ValueError("Напиши сообщение или приложи картинку")
+        if not self.message.strip() and not self.images and not self.files:
+            raise ValueError("Напиши сообщение или приложи файл")
         return self
 
 
@@ -125,10 +133,11 @@ def send_config_chat(value: ChatInput, authorization: str = Header(default=""), 
             token_id=a.token.id,
             project_id=value.project_id,
             thread_id=value.thread_id,
-            request=value.message or "(см. картинку)",
+            request=value.message or ("(см. картинку)" if value.images else "(см. файл)"),
             credential_secret=encrypt(authorization.removeprefix("Bearer ")),
         )
         save_dialogue_images(row.id, value.images)
+        save_dialogue_files(row.id, value.files)
         db.add(row)
         if thread and thread.title == "Новый чат":
             thread.title = " ".join(value.message.split())[:100] or "Новый чат"

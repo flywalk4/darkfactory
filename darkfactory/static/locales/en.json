@@ -614,8 +614,6 @@
  "Прежние токены {name} перестанут работать. Продолжить?": "Previous {name} tokens will stop working. Continue?",
  "Прикрепить": "Attach",
  "Приложенная картинка": "Attached image",
- "Приложить картинку": "Attach an image",
- "Приложить картинку (или вставь Ctrl/Cmd+V)": "Attach an image (or paste with Ctrl/Cmd+V)",
  "Прими версию и передай её задаче.": "Accept the version and pass it to the task.",
  "Принята": "Accepted",
  "Принятая версия": "Accepted version",
@@ -930,5 +928,10 @@
  "через {h} ч": "in {h} h",
  "● Что агент делает сейчас": "● What the agent is doing now",
  "⚠ Нет активности агента {n} мин": "⚠ No agent activity for {n} min",
- "Результат": "Result"
+ "Результат": "Result",
+ "Не больше 4 файлов в сообщении": "No more than 4 files per message",
+ "Файл больше 200 КБ": "File is larger than 200 KB",
+ "Убрать файл": "Remove file",
+ "Приложить файл": "Attach a file",
+ "Приложить картинку, .txt или .json (или вставь Ctrl/Cmd+V)": "Attach an image, .txt or .json (or paste with Ctrl/Cmd+V)"
 }

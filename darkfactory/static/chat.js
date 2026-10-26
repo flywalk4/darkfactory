@@ -7,8 +7,11 @@
   if (!shell) return;
   const mobile = window.matchMedia('(max-width: 980px)');
   const state = {mounted:false, open:false, busy:false, sending:false, polling:false, changing:false,
-    context:'', organization:'', thread:'', active:null, activeStatus:null, signature:'', epoch:0, timer:null, images:[], due:0, delay:2000};
+    context:'', organization:'', thread:'', active:null, activeStatus:null, signature:'', epoch:0, timer:null, images:[], files:[], due:0, delay:2000};
   const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  const textTypes = {'.txt':'text/plain', '.json':'application/json'};
+  const textType = file => textTypes[(file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase()];
+  const attachable = file => imageTypes.includes(file.type) || textType(file);
   const imageCache = new Map();
   async function imageSource(path) {
     if (!imageCache.has(path)) imageCache.set(path, fetch('/api' + path.replace(/^\/api/, ''), {headers:{Authorization:'Bearer ' + token}})
@@ -18,6 +21,19 @@
   }
   function attach(files) {
     for (const file of files) {
+      const media_type = textType(file);
+      if (media_type) {
+        if (state.files.length >= 4) { ui.error.textContent = tr('Не больше 4 файлов в сообщении'); ui.error.hidden = false; break; }
+        if (file.size > 200 * 1024) { ui.error.textContent = tr('Файл больше 200 КБ'); ui.error.hidden = false; continue; }
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (state.files.length >= 4) return;
+          state.files.push({name:file.name, media_type, data:String(reader.result).split(',')[1] || ''});
+          renderAttachments();
+        };
+        reader.readAsDataURL(file);
+        continue;
+      }
       if (!imageTypes.includes(file.type)) continue;
       if (state.images.length >= 4) { ui.error.textContent = tr('Не больше 4 картинок в сообщении'); ui.error.hidden = false; break; }
       if (file.size > 5 * 1024 * 1024) { ui.error.textContent = tr('Картинка больше 5 МБ'); ui.error.hidden = false; continue; }
@@ -31,8 +47,18 @@
     }
   }
   function renderAttachments() {
-    ui.attachments.hidden = !state.images.length;
-    ui.attachments.replaceChildren(...state.images.map((image, index) => {
+    ui.attachments.hidden = !state.images.length && !state.files.length;
+    const files = state.files.map((file, index) => {
+      const item = element('div', 'df-chat-attachment df-chat-attachment-file', file.name);
+      item.title = file.name;
+      const remove = element('button', 'df-chat-attachment-remove', '×');
+      remove.type = 'button';
+      remove.title = tr('Убрать файл');
+      remove.onclick = () => { state.files.splice(index, 1); renderAttachments(); };
+      item.append(remove);
+      return item;
+    });
+    ui.attachments.replaceChildren(...files, ...state.images.map((image, index) => {
       const item = element('div', 'df-chat-attachment');
       const img = element('img');
       img.src = image.preview;
@@ -68,7 +94,7 @@
   function controls() {
     const readonly = !maySend();
     ui.input.disabled = readonly || state.sending;
-    ui.send.disabled = readonly || state.sending || state.changing || state.busy || (!ui.input.value.trim() && !state.images.length);
+    ui.send.disabled = readonly || state.sending || state.changing || state.busy || (!ui.input.value.trim() && !state.images.length && !state.files.length);
     ui.presets.querySelectorAll('button').forEach(button => button.disabled = readonly || state.sending || state.busy);
     ui.context.disabled = state.sending || state.changing;
     ui.threads.disabled = state.sending || state.changing;
@@ -235,6 +261,11 @@
         });
         item.append(gallery);
       }
+      if (Array.isArray(message.files) && message.files.length) {
+        const list = element('div', 'df-chat-message-files');
+        message.files.forEach(name => list.append(element('span', 'df-chat-message-file', '📄 ' + String(name))));
+        item.append(list);
+      }
       const labels = {queued:tr('В очереди'), waiting_pool:tr('Ждёт подписку'), running:tr('В работе'), recovering:tr('Восстановление'), cancelling:tr('Останавливается'), failed:tr('Не удалось выполнить запрос'), cancelled:tr('Отменено')};
       if (labels[message.status]) item.append(element('small', 'df-chat-message-state', labels[message.status]));
       if (message.role === 'assistant' && message.organization_access_available === true && message.id) {
@@ -312,7 +343,8 @@
     event.preventDefault();
     const message = ui.input.value.trim();
     const images = state.images.map(({media_type, data}) => ({media_type, data}));
-    if ((!message && !images.length) || !maySend() || state.sending || state.changing || state.busy) return;
+    const files = state.files.map(({name, media_type, data}) => ({name, media_type, data}));
+    if ((!message && !images.length && !files.length) || !maySend() || state.sending || state.changing || state.busy) return;
     syncContext();
     // A history request started before this submission must not clear the
     // queued/busy indicator with an older server snapshot.
@@ -322,11 +354,12 @@
     ui.error.hidden = true;
     controls();
     try {
-      const result = await api('/config-chat', 'POST', {message, images, thread_id:state.thread || null, ...(context ? {project_id:context} : {})});
+      const result = await api('/config-chat', 'POST', {message, images, files, thread_id:state.thread || null, ...(context ? {project_id:context} : {})});
       if (epoch !== state.epoch || !authenticated()) return;
       ui.input.value = '';
       ui.input.style.height = '';
       state.images = [];
+      state.files = [];
       renderAttachments();
       state.busy = true;
       state.active = result.id;
@@ -428,7 +461,7 @@
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(event); }
     });
     ui.input.addEventListener('paste', event => {
-      const files = [...(event.clipboardData?.files || [])].filter(file => imageTypes.includes(file.type));
+      const files = [...(event.clipboardData?.files || [])].filter(attachable);
       if (files.length) { event.preventDefault(); attach(files); }
     });
     form.addEventListener('dragover', event => { if ([...event.dataTransfer.types].includes('Files')) event.preventDefault(); });
@@ -437,14 +470,14 @@
     ui.attachments.hidden = true;
     ui.file = element('input');
     ui.file.type = 'file';
-    ui.file.accept = imageTypes.join(',');
+    ui.file.accept = [...imageTypes, ...Object.keys(textTypes)].join(',');
     ui.file.multiple = true;
     ui.file.hidden = true;
     ui.file.onchange = () => { attach(ui.file.files); ui.file.value = ''; };
     ui.attach = element('button', 'df-chat-attach', '📎');
     ui.attach.type = 'button';
-    ui.attach.title = tr('Приложить картинку (или вставь Ctrl/Cmd+V)');
-    ui.attach.setAttribute('aria-label', tr('Приложить картинку'));
+    ui.attach.title = tr('Приложить картинку, .txt или .json (или вставь Ctrl/Cmd+V)');
+    ui.attach.setAttribute('aria-label', tr('Приложить файл'));
     ui.attach.onclick = () => ui.file.click();
     const actions = element('div', 'df-chat-form-actions');
     actions.append(ui.attach, ui.file, element('small', '', tr('Enter — отправить · Shift + Enter — строка')));

@@ -98,3 +98,6 @@
 .df-chat-attach { padding: 7px 9px; font-size: 13px; background: transparent; border: 1px solid #2c3a4f; }
 .df-chat-message-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .df-chat-message-images img { max-width: 160px; max-height: 120px; border-radius: 6px; border: 1px solid #2c3a4f; display: block; }
+.df-chat-attachment-file { width: auto; max-width: 160px; padding: 0 24px 0 8px; display: flex; align-items: center; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; color: #c9d4e3; }
+.df-chat-message-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.df-chat-message-file { padding: 3px 8px; font-size: 12px; border: 1px solid #2c3a4f; border-radius: 6px; color: #c9d4e3; }
