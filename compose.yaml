@@ -18,6 +18,9 @@ x-control: &control
   depends_on:
     db:
       condition: service_healthy
+  # Docker Desktop defines this name itself; on Linux it points at the host for a personal gateway.
+  extra_hosts:
+    - host.docker.internal:host-gateway
   restart: unless-stopped
 services:
   db:

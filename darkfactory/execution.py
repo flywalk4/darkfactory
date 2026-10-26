@@ -891,6 +891,14 @@ class DockerExecutor:
                     if job["personal_mode"] and job["credentials"].get("base_url"):
                         endpoint = urlsplit(job["credentials"]["base_url"])
                         allowed.add((endpoint.hostname, endpoint.port or 80))
+                elif (
+                    connection.provider == "claude"
+                    and job["personal_mode"]
+                    and job["credentials"].get("base_url")
+                ):
+                    # The host gateway forwards to the provider itself; the container reaches only the gateway.
+                    endpoint = urlsplit(job["credentials"]["base_url"])
+                    allowed.add((endpoint.hostname, endpoint.port or 80))
                 else:
                     allowed.add(
                         ("api.openai.com" if connection.provider == "codex" else "api.anthropic.com", 443)

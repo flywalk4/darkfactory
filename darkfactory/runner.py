@@ -1431,7 +1431,7 @@ def codex(job, gateway_url=None):
             proc.wait()
 
 
-def claude(job):
+def claude(job, upstream=None):
     servers = {
         server["name"]: {"type": "http", "url": server["url"]}
         for server in (job.get("agent_profile") or {}).get("mcp_definitions", [])
@@ -1474,7 +1474,9 @@ def claude(job):
     relay = ExitStack()
     # The CLI gets a placeholder; the runner's relay adds the real token, so the agent never holds it.
     base = relay.enter_context(
-        auth_relay(ANTHROPIC_API, {"Authorization": "Bearer " + job["credentials"]["oauth_token"]})
+        auth_relay(
+            upstream or ANTHROPIC_API, {"Authorization": "Bearer " + job["credentials"]["oauth_token"]}
+        )
     )
     env = {
         **os.environ,
@@ -1763,6 +1765,16 @@ def main():
                     "mcp_definitions": stack.enter_context(project_mcp(profile["mcp_definitions"])),
                 }
             if (
+                job["provider"] == "claude"
+                and job.get("personal_mode")
+                and job["credentials"].get("base_url")
+            ):
+                endpoint = urlsplit(job["credentials"]["base_url"])
+                gateway = stack.enter_context(
+                    local_tunnel("/run/job/egress.sock", endpoint.hostname, endpoint.port or 80)
+                )
+                result = claude(job, gateway + endpoint.path.rstrip("/"))
+            elif (
                 job["provider"] == "codex"
                 and job.get("personal_mode")
                 and job["credentials"].get("auth_method") == "codex_local"

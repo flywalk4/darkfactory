@@ -1,0 +1,16 @@
+[Unit]
+Description=Expose the host's agent-stack gateway (bili, 127.0.0.1:18788) to factory containers on the Docker bridge
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+# agent-stack binds 127.0.0.1 only; containers reach the host as host.docker.internal = the docker0 address.
+# The bridge address is not reachable from outside the host.
+Environment=BRIDGE=172.17.0.1
+Environment=PORT=18788
+ExecStart=/bin/sh -c 'exec /usr/bin/socat TCP-LISTEN:${PORT},bind=${BRIDGE},fork,reuseaddr TCP:127.0.0.1:${PORT}'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

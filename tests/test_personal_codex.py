@@ -144,3 +144,15 @@ def test_personal_gateway_rejects_remote_or_ambiguous_urls(monkeypatch, url):
             },
         )
     assert error.value.status_code == 400
+
+
+def test_claude_gateway_only_in_personal_mode_and_on_this_host(monkeypatch):
+    gateway = "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"
+    monkeypatch.delenv("DARKFACTORY_PERSONAL_MODE", raising=False)
+    with pytest.raises(HTTPException):
+        check_credentials("claude", {"oauth_token": "test-token", "base_url": gateway})
+    monkeypatch.setenv("DARKFACTORY_PERSONAL_MODE", "1")
+    check_credentials("claude", {"oauth_token": "test-token", "base_url": gateway})
+    check_credentials("claude", {"oauth_token": "test-token"})
+    with pytest.raises(HTTPException):
+        check_credentials("claude", {"oauth_token": "test-token", "base_url": "http://example.com/x"})

@@ -135,6 +135,28 @@ class ConnectionInput(BaseModel):
     credentials: dict
 
 
+def check_gateway(url):
+    """A personal-mode gateway (agent-stack's bili/headroom on the host): plain HTTP to this host only."""
+    try:
+        endpoint = urlsplit(str(url))
+        valid = (
+            endpoint.scheme == "http"
+            and endpoint.hostname in {"127.0.0.1", "localhost", "host.docker.internal"}
+            and not endpoint.username
+            and not endpoint.password
+            and not endpoint.query
+            and not endpoint.fragment
+            and 1 <= (endpoint.port if endpoint.port is not None else 80) <= 65535
+            and not any(ord(char) <= 32 or char == "\\" for char in str(url))
+        )
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise HTTPException(
+            400, "Личный шлюз должен использовать HTTP на локальном хосте без реквизитов в URL"
+        )
+
+
 def check_credentials(provider, credentials):
     required = {
         "codex": {"accessToken"},
@@ -152,28 +174,15 @@ def check_credentials(provider, credentials):
             ):
                 raise HTTPException(400, "Для локального входа нужен chatgptAccountId")
             if "base_url" in credentials:
-                try:
-                    endpoint = urlsplit(str(credentials["base_url"]))
-                    valid = (
-                        endpoint.scheme == "http"
-                        and endpoint.hostname in {"127.0.0.1", "localhost", "host.docker.internal"}
-                        and not endpoint.username
-                        and not endpoint.password
-                        and not endpoint.query
-                        and not endpoint.fragment
-                        and 1 <= (endpoint.port if endpoint.port is not None else 80) <= 65535
-                        and not any(ord(char) <= 32 or char == "\\" for char in credentials["base_url"])
-                    )
-                except (TypeError, ValueError):
-                    valid = False
-                if not valid:
-                    raise HTTPException(
-                        400, "Личный шлюз должен использовать HTTP на локальном хосте без реквизитов в URL"
-                    )
+                check_gateway(credentials["base_url"])
         elif method != "siwc":
             raise HTTPException(
                 400, "Для размещаемого сервиса нужен подтверждённый Sign in with ChatGPT (auth_method=siwc)"
             )
+    if provider == "claude" and "base_url" in credentials:
+        if os.getenv("DARKFACTORY_PERSONAL_MODE") != "1":
+            raise HTTPException(400, "Шлюз для Claude доступен только в личном режиме")
+        check_gateway(credentials["base_url"])
     if provider == "api":
         parsed = urlsplit(str(credentials["base_url"]))
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
