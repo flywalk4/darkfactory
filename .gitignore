@@ -1,11 +1,41 @@
+# Python
 .venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 *.egg-info/
+build/
+dist/
+
+# Secrets and local configuration: .env holds POSTGRES_PASSWORD and DARKFACTORY_ADMIN_TOKEN
 .env
+.env.*
+!.env.example
+bootstrap-token
+encryption.key
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Local runtime data
 .data/
-.DS_Store
-.playwright-cli/
 artifacts/
+*.db
+*.sqlite
+*.log
+node_modules/
+
+# Editors, OS and agent tools
+.DS_Store
+.idea/
+.vscode/
+.playwright-cli/
 .omc/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/*.lock
