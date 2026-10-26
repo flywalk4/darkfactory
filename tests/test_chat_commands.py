@@ -447,6 +447,63 @@ def test_rocket_command_and_thread_answer(client, setup_project):
         assert session.get(NotificationChannel, channel["id"]).command_offset is None
 
 
+def test_rocket_thread_reply_without_destination_override(client, setup_project):
+    """A channel without a recipient answers in the thread with tmid alone: Rocket.Chat refuses roomId
+    when the webhook's "Override Destination Channel" is off."""
+    project, pool = setup_project
+    connect(client, pool)
+    response = client.post(
+        "/api/notification-channels",
+        json={
+            "name": "Ops",
+            "provider": "rocketchat",
+            "credentials": {
+                "webhook_url": WEBHOOK,
+                "director_token": command_token(client),
+                "outgoing_token": OUTGOING,
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    channel = response.json()
+    assert rocket(client, channel, "!director что в очереди?", "m1").status_code == 200
+    director.advance_dialogues(Model({"reply": "Очередь пуста.", "actions": []}))
+
+    def refuse(request):
+        body = json.loads(request.content)
+        if "roomId" in body or "channel" in body:
+            error = "overriding destination channel is disabled for this integration"
+            return httpx.Response(400, json={"success": False, "error": error})
+        return httpx.Response(200, json={"success": True})
+
+    with httpx.Client(transport=httpx.MockTransport(refuse)) as http:
+        chat_commands.exchange(client=http)
+    with db.Session() as session:
+        delivery = session.query(NotificationDelivery).filter_by(channel_id=channel["id"]).one()
+        assert delivery.state == "sent", delivery.last_error
+        assert delivery.reply_to == {"room_id": "ROOM", "tmid": "m1"}
+        assert session.query(director.Dialogue).one().origin_replied is True
+
+
+def test_director_answer_is_replied_only_once_delivered(client, setup_project):
+    project, pool = setup_project
+    connect(client, pool)
+    channel = save_channel(
+        client, "rocketchat", director_token=command_token(client), outgoing_token=OUTGOING
+    )
+    rocket(client, channel, "!director что в очереди?", "m1")
+    director.advance_dialogues(Model({"reply": "Очередь пуста.", "actions": []}))
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(400))) as http:
+        chat_commands.exchange(client=http)
+    with db.Session() as session:
+        assert session.query(NotificationDelivery).filter_by(channel_id=channel["id"]).one().state == "failed"
+        assert session.query(director.Dialogue).one().origin_replied is False
+    # A failed answer is not queued again.
+    chat_commands.queue_director_replies()
+    with db.Session() as session:
+        assert session.query(NotificationDelivery).filter_by(channel_id=channel["id"]).count() == 1
+
+
 def test_rocket_bang_commands(client, setup_project, monkeypatch):
     project, pool = setup_project
     connect(client, pool)

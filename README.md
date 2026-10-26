@@ -368,7 +368,7 @@ The command is also available as `python -m darkfactory.cli director`. If the te
 
 ## Human notifications
 
-In the settings add a Rocket.Chat channel with an HTTPS webhook and a recipient `@username` or `#channel`, or Telegram with a bot token and a chat ID. For Rocket.Chat, allow channel override in the incoming webhook. The recipient can be changed without re-entering the URL. Select a project or the whole organization, then the events: questions, stops, errors, limits, accepted changes and incidents. Setting up a channel does not send any messages by itself. Agent questions and pipeline stops enter the queue automatically. The API `POST /api/tasks/{id}/notify` with `{"message":"..."}` sends a message to the task's configured channels.
+In the settings add a Rocket.Chat channel with an HTTPS webhook and an optional recipient `@username` or `#channel`, or Telegram with a bot token and a chat ID. A Rocket.Chat recipient needs channel override in the incoming webhook (see below). The recipient can be changed without re-entering the URL. Select a project or the whole organization, then the events: questions, stops, errors, limits, accepted changes and incidents. Setting up a channel does not send any messages by itself. Agent questions and pipeline stops enter the queue automatically. The API `POST /api/tasks/{id}/notify` with `{"message":"..."}` sends a message to the task's configured channels.
 
 Delivery runs separately from tasks, with five attempts and a delay between retries. Secrets are not shown again. After a failure between sending and saving the acknowledgement, a duplicate message is possible. Answers to questions are entered in the task card or directly in the chat.
 
@@ -401,7 +401,14 @@ Create an outgoing webhook for the "Message sent" event in the same room as the 
 - `!task <id>`: the task card.
 - `!help`: the command list.
 
-In a task notification's thread, plain text is the answer to the agent, and `!task`, `!resume`, `!merge` and `!cancel` act on that task. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar.
+In a task notification's thread, plain text is the answer to the agent, and `!task`, `!resume`, `!merge` and `!cancel` act on that task.
+
+The incoming webhook works in two modes, chosen by its "Override Destination Channel" setting:
+
+- **Override off** (the Rocket.Chat default): leave the channel's recipient empty. Every message goes to the webhook's own channel, and thread answers carry only the thread ID (`tmid`). Rocket.Chat refuses any request with `roomId` or `channel` here (`overriding destination channel is disabled for this integration`), so with override off a recipient makes every delivery fail. Put the outgoing webhook in the same room as the incoming one, or answers land outside the thread.
+- **Override on**: the recipient picks where notifications go, and command answers name the room they came from (`roomId`) next to `tmid`. Use this mode when notifications go to a room other than the webhook's own.
+
+Delivery state is in the channel's outbox (`notification_deliveries`). A Director answer to a chat command counts as replied (`director_dialogues.origin_replied`) only after Rocket.Chat or Telegram accepted it; a refused answer stays unreplied with the provider's HTTP status in `last_error`. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar.
 
 ### Merge notifications
 

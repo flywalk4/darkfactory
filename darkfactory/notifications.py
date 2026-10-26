@@ -592,9 +592,11 @@ def _send(client, claimed):
         }
         if avatar := public_asset("logo.png"):
             payload["avatar"] = avatar
-        if reply_to.get("room_id"):
+        # Rocket.Chat rejects roomId/channel when the webhook's "Override Destination Channel" is off.
+        # A channel without a recipient posts to the webhook's own channel, so a thread reply needs only tmid.
+        if reply_to.get("room_id") and (claimed.get("recipient") or not reply_to.get("tmid")):
             payload["roomId"] = reply_to["room_id"]
-        elif claimed.get("recipient"):
+        elif claimed.get("recipient") and not reply_to.get("room_id"):
             payload["channel"] = claimed["recipient"]
         if reply_to.get("tmid"):
             payload["tmid"] = reply_to["tmid"]

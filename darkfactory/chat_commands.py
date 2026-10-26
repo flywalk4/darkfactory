@@ -366,7 +366,10 @@ def run_bang(channel_id, name, argument, ref, reply_to, thread_task, sender):
 
 
 def queue_director_replies():
-    """Post each finished chat-started dialogue's answer back where the command came from."""
+    """Post each finished chat-started dialogue's answer back where the command came from.
+
+    `origin_replied` turns true once the chat accepted that answer; a failed delivery leaves it false.
+    """
     with transaction() as db:
         for row in db.scalars(
             select(Dialogue).where(
@@ -375,20 +378,29 @@ def queue_director_replies():
                 Dialogue.status.in_(FINISHED),
             )
         ):
-            row.origin_replied = True
             channel = db.get(NotificationChannel, row.origin.get("channel_id"))
             if channel is None:
                 continue
+            key = "director:" + row.id
+            state = db.scalar(
+                select(NotificationDelivery.state).filter_by(channel_id=channel.id, dedupe_key=key)
+            )
+            if state is not None:
+                # Replied means the chat accepted the answer, not merely that it was queued.
+                row.origin_replied = state == "sent"
+                continue
             reply_to = {
-                key: value for key, value in row.origin.items() if key not in {"channel_id", "sender"}
+                name: value for name, value in row.origin.items() if name not in {"channel_id", "sender"}
             }
-            _reply(db, channel, "director:" + row.id, "Директор: " + (row.reply or row.status), reply_to)
+            _reply(db, channel, key, "Директор: " + (row.reply or row.status), reply_to)
 
 
 def exchange(*, client=None):
-    """One notification tick: queue director answers, then deliver the outbox."""
+    """One notification tick: queue director answers, deliver the outbox, then mark answers delivered."""
     if client is None:
         with httpx.Client(follow_redirects=False, trust_env=False) as http:
             return exchange(client=http)
     queue_director_replies()
-    return dispatch_notifications(limit=10, client=client)
+    processed = dispatch_notifications(limit=10, client=client)
+    queue_director_replies()
+    return processed
