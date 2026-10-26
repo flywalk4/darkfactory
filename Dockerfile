@@ -14,16 +14,11 @@ COPY --from=docker:28.3.3-cli /usr/local/libexec/docker/cli-plugins/docker-build
 COPY darkfactory ./darkfactory
 CMD ["uvicorn", "darkfactory.api:app", "--host", "0.0.0.0", "--port", "8000"]
 
+# Node and Playwright only. The agent CLIs install after Chromium, so bumping them keeps the browser layer.
 FROM node:22-slim AS cli
-ARG CODEX_VERSION=0.162.1
-ARG CLAUDE_VERSION=2.1.304
 ARG PLAYWRIGHT_VERSION=1.64.1
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
-RUN npm install -g @openai/codex@${CODEX_VERSION} @anthropic-ai/claude-code@${CLAUDE_VERSION} \
-    @playwright/test@${PLAYWRIGHT_VERSION} @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
- && ln -s "$(find /usr/local/lib/node_modules/@openai/codex -type f -path '*/bin/codex' | head -1)" /usr/local/bin/apply_patch \
- && test -x /usr/local/bin/apply_patch
-# Models call apply_patch from the shell; codex answers to that name, so agents stop hunting for a patch tool.
+RUN npm install -g @playwright/test@${PLAYWRIGHT_VERSION} @playwright/mcp@${PLAYWRIGHT_MCP_VERSION}
 
 # Everything an agent container needs except the factory's own code. Project toolchains build on this
 # image, so a factory deploy does not rebuild their SDK layers.
@@ -44,6 +39,14 @@ ARG MCP_ATLASSIAN_VERSION=0.23.1
 RUN python -m venv /opt/mcp-atlassian \
     && /opt/mcp-atlassian/bin/pip install --no-cache-dir --timeout 120 mcp-atlassian==${MCP_ATLASSIAN_VERSION}
 COPY --chmod=755 scripts/mcp-atlassian.sh /usr/local/bin/mcp-atlassian
+# Agent CLIs last: declared here, a new CLI version rebuilds only the layers below, never Chromium.
+# Models call apply_patch from the shell; codex answers to that name, so agents stop hunting for a patch tool.
+ARG CODEX_VERSION=0.162.1
+ARG CLAUDE_VERSION=2.1.304
+RUN npm install -g @openai/codex@${CODEX_VERSION} @anthropic-ai/claude-code@${CLAUDE_VERSION} \
+ && npm cache clean --force \
+ && ln -s "$(find /usr/local/lib/node_modules/@openai/codex -type f -path '*/bin/codex' | head -1)" /usr/local/bin/apply_patch \
+ && test -x /usr/local/bin/apply_patch
 RUN useradd --uid 1000 --create-home agent && useradd --uid 1001 --no-create-home --shell /usr/sbin/nologin mcp
 USER agent
 WORKDIR /workspace
