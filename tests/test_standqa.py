@@ -239,3 +239,19 @@ def test_schedules_page_shows_the_stand_run_and_its_tasks(client, setup_project)
     job = client.get(f"/api/projects/{project['id']}/schedules").json()["jobs"]["stand_qa"]
     assert not job["running"] and not job["requested"] and job["found"] == 1
     assert [task["title"] for task in job["tasks"]] == ["Вход падает с 500"]
+
+
+def test_a_fixed_bug_waiting_for_a_deploy_is_not_reported_again(client, setup_project):
+    project, pool = setup_project
+    connect(client, pool)
+    configure(client, project, qa_hours=0)
+    client.post(f"/api/projects/{project['id']}/qa")
+    assert standqa.run(StandAgent(report(bug("Счётчик строк не обновляется"))))
+    with db.transaction() as session:
+        for task in session.query(db.Task).filter_by(project_id=project["id"]):
+            task.state = "merged"
+    client.post(f"/api/projects/{project['id']}/qa")
+    tester = StandAgent(report(bug("Счётчик строк не обновляется")))
+    assert standqa.run(tester)
+    assert "Счётчик строк не обновляется (fixed, waiting for a deploy)" in tester.calls[0][1]
+    assert len(project_tasks(project["id"])) == 1

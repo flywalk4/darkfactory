@@ -62,7 +62,7 @@ def test_light_work_takes_least_loaded_subscription_of_any_provider(scheduler): 
 def test_light_model_respects_pool_override_and_allowlist(scheduler, monkeypatch):  # noqa: F811
     session, project, pool = scheduler
     monkeypatch.delenv("DARKFACTORY_LIGHT_MODEL_CLAUDE", raising=False)
-    assert agents.light_model("claude") == "haiku"
+    assert agents.light_model("claude") == "claude-haiku-5-5"
     assert agents.light_model("claude", {"light_models": {"claude": "sonnet"}}) == "sonnet"
     pool.policy = {"allowed_models": ["gpt-5.1-codex-mini"], "light_models": {"codex": "gpt-5.1-codex-mini"}}
     connection(session, project, pool, "claude")
@@ -75,3 +75,24 @@ def test_codex_keeps_its_own_model_unless_a_light_one_is_configured(monkeypatch)
     monkeypatch.delenv("DARKFACTORY_LIGHT_MODEL_CODEX", raising=False)
     assert agents.light_model("codex") is None
     assert agents.light_model("codex", {"light_models": {"codex": "allowed-mini"}}) == "allowed-mini"
+
+
+def test_hard_work_goes_to_the_heavy_model(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.delenv("DARKFACTORY_HEAVY_MODEL_CLAUDE", raising=False)
+    assert agents.heavy_model("claude") == "claude-opus-5-5"
+    assert agents.heavy_model("claude", {"heavy_models": {"claude": "x"}}) == "x"
+    assert agents.heavy_model("codex") is None
+
+    def item(**fields):
+        return SimpleNamespace(**{"role_config": {}, "priority": "normal", "corrections": 0, **fields})
+
+    assert not agents.heavy(item(), "implement")
+    assert agents.heavy(item(role_config={"tier": "heavy"}), "implement")
+    assert agents.heavy(item(priority="critical"), "review")
+    assert agents.heavy(item(corrections=2), "implement")
+    assert not agents.heavy(item(corrections=2), "review")
+    assert agents.heavy(item(role_config={"plan": True}), "plan")
+    assert agents.heavy(item(), "review", risky=True)
+    assert not agents.heavy(item(), "review")

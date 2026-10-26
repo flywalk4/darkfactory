@@ -169,7 +169,7 @@ Gateway के बिना, Codex का ChatGPT को जाने वाल�
 python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
 ```
 
-यह मोड केवल स्थानीय HTTP addresses स्वीकार करता है और इसके लिए `DARKFACTORY_PERSONAL_MODE=1` ज़रूरी है। Executor दिए गए gateway से एक निश्चित tunnel और addresses की मौजूदा allow-list के ज़रिए जुड़ता है; container का नेटवर्क `none` ही रहता है। यह मोड paid API को सक्षम नहीं करता।
+यह मोड केवल स्थानीय HTTP addresses स्वीकार करता है और इसके लिए `DARKFACTORY_PERSONAL_MODE=1` ज़रूरी है। Claude कनेक्शन अपने credentials में इसी तरह का gateway लेता है (`"base_url": "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"`, agent-stack के bili और headroom के लिए); उसका relay provider की ओर नहीं, बल्कि वहीं आगे भेजता है। Linux पर केवल loopback पर सुनने वाला gateway `scripts/systemd/darkfactory-gateway.service` (Docker bridge address पर socat) के ज़रिए containers के लिए खुलता है; agent-stack services को logout के बाद भी चलते रहना चाहिए (`loginctl enable-linger`)। Executor दिए गए gateway से एक निश्चित tunnel और addresses की मौजूदा allow-list के ज़रिए जुड़ता है; container का नेटवर्क `none` ही रहता है। यह मोड paid API को सक्षम नहीं करता।
 
 ### Pools और engine का चयन
 
@@ -424,7 +424,21 @@ Incoming webhook दो मोड में काम करता है, ज�
 जब कोई शीर्ष-स्तरीय task पूरा होता है, तो सूचना में **"Merge to main / reject"** link भी होता है। यह factory के भीतर merge का प्रस्ताव है, स्थानीय Git के लिए भी उपलब्ध। यह स्वीकृत commit को pin करता है और मौजूदा `main` के विरुद्ध पूरा diff दिखाता है (100,000 अक्षरों तक, कटाव-चिह्न के साथ)। Owner इसे merge या अस्वीकार कर सकता है; GET link अपने-आप कुछ नहीं बदलता। स्थानांतरण में बताए गए commit तक `preprod` के सभी बदलाव शामिल होते हैं, subtasks सहित। अस्वीकार करने पर `preprod` जैसा है वैसा रहता है।
 
 > [!NOTE]
-> `main` में कोई automatic स्थानांतरण और कोई deployment नहीं है; Director यह निर्णय नहीं ले सकता। जिस GitLab project में deploy job है, वह owner के merge के बाद deploy होता है ([नीचे](#स्टैंड-टेस्टिंग-और-gitlab-deploy))। यदि `main` स्वीकृत commit से अलग हो गया है, तो पहले integration और दोबारा checks चाहिए। पुराने पूरे हुए tasks को नए प्रस्ताव अपने-आप नहीं मिलते।
+> डिफ़ॉल्ट रूप से `main` में कोई automatic स्थानांतरण नहीं है, और Director यह निर्णय नहीं ले सकता; opt-in के लिए देखें [स्वचालित promotion](#स्वचालित-promotion)। जिस GitLab project में deploy job है, वह owner के merge के बाद deploy होता है ([नीचे](#स्टैंड-टेस्टिंग-और-gitlab-deploy))। यदि `main` स्वीकृत commit से अलग हो गया है, तो पहले integration और दोबारा checks चाहिए। पुराने पूरे हुए tasks को नए प्रस्ताव अपने-आप नहीं मिलते।
+
+### स्वचालित promotion
+
+Owner किसी project को स्वयं promote करने दे सकता है: **"परख अवधि के बाद preprod को main में ऑटो-प्रमोट, घंटे"** (`auto_promote_hours`, `0` = केवल हाथ से) सेट करें और एक **"preprod को main में ऑटो-प्रमोट करें"** [शेड्यूल](#शेड्यूल) जोड़ें। शेड्यूल चलने पर नवीनतम स्वीकृत `preprod` केवल तभी `main` में जाता है जब:
+
+- वह कम से कम `auto_promote_hours` पहले स्वीकृत हुआ था और उसके बाद कोई preprod incident नहीं हुआ;
+- अंतिम preprod check स्वस्थ है और सामान्य promotion guards पास होते हैं;
+- [लीक जाँच](#लीक-जाँच) `main..preprod` diff और उसके commit messages में कुछ नहीं पाती।
+
+Promotion को task पर factory के निर्णय के रूप में दर्ज किया जाता है, और यदि कॉन्फ़िगर हो तो GitLab deploy job उसके बाद चलता है। Schedule की पंक्ति दिखाती है कि कोई run promote क्यों नहीं हुआ।
+
+### लीक जाँच
+
+`scripts/leak_check.py` उन projects के लिए है जो सार्वजनिक repository में रहते हैं। Required check के रूप में यह ऐसा बदलाव विफल करता है जो जोड़ी गई lines, commit messages या file names में कोई credential (GitLab, GitHub, OpenAI/Anthropic, Slack और AWS keys, private keys, JWTs, bearer tokens, URLs या assignments में passwords) या owner का अपना कोई pattern जोड़ता है। Owner के patterns (internal domains, addresses, logins) project के test variable `TEST_LEAK_PATTERNS` में जाते हैं, प्रति पंक्ति एक या `;` से अलग; वे कभी repository में नहीं जाते। Factory checks को task का base commit `DARKFACTORY_CHECK_BASE` के रूप में देती है। आउटपुट नियम और पंक्ति बताता है, मान कभी नहीं। जानबूझकर दिया गया उदाहरण अपनी पंक्ति पर marker `leak-check: allow` के साथ रहता है।
 
 ### main को वापस preprod में sync करना
 
@@ -505,6 +519,17 @@ Agent जिस हर defect को दो बार reproduce करता ह
 
 Notifications: `qa_reported` और `qa_not_fixed`। API: `POST /api/projects/{id}/qa` अभी run शुरू करता है। Run project का writer pool इस्तेमाल करता है और अधिकतम `DARKFACTORY_QA_SECONDS` (1800) तक चलता है; `DARKFACTORY_STAND_QA=0` पूरे installation के लिए stand testing बंद कर देता है।
 
+### स्टैंड बिल्ड
+
+जो platform ऐप खुद बनाता है (editor में assistant वाला low-code platform), उसके लिए **"स्टैंड पर ऐप बिल्ड"** [शेड्यूल](#शेड्यूल) tester को एक माँगने वाला ग्राहक बना देता है। हर run project के **"स्टैंड पर बनाने के लिए ऑर्डर"** (`build_tasks`, प्रति पंक्ति एक; खाली = factory का अपना सेट: छुट्टी के अनुरोध, support tickets, डॉक्टर की appointments, orders वाली दुकान, कर्मचारी survey) में से अगला अनुरोध लेता है और:
+
+1. tester के अपने tenant में sign in करता है और अनुरोध platform के builder को शब्दशः देता है, मालिक के **"इस प्लेटफ़ॉर्म पर ऐप कैसे बनाएँ"** (`build_instructions`) का पालन करते हुए;
+2. परिणाम की प्रतीक्षा करता है, ऐप को publish या preview करता है और हर भूमिका में उसे शुरू से अंत तक इस्तेमाल करता है, 390 और 1440 px पर;
+3. पूर्णता, सटीकता, usability और visual quality को 0–5 अंक देता है और दर्ज करता है कि ऐप बना या नहीं, कितना समय लगा, compile errors और असफल tests;
+4. प्रति run अधिकतम `build_max_tasks` समस्याएँ (डिफ़ॉल्ट 3) platform project के fix tasks में बदलता है, हर एक के साथ उसके मूल कारण की श्रेणी: `dsl`, `compiler`, `builder`, `components`, `studio`, `runtime` या `other`। Task platform को ठीक करने को कहता है, बनाए गए एक ऐप को नहीं।
+
+Schedule की पंक्ति आख़िरी build और पिछले दस runs में बने ऐप का हिस्सा और औसत अंक दिखाती है; आख़िरी 60 runs सप्ताह-दर-सप्ताह तुलना के लिए रखे जाते हैं। Builds और stand tests एक browser slot साझा करते हैं। `DARKFACTORY_BUILD_SECONDS` (3000) एक run की सीमा तय करता है।
+
 ### GitLab deploys
 
 GitLab project के लिए **"GitLab डिप्लॉय जॉब"** में `main` pipeline के किसी manual job का नाम लिखें (जैसे `deploy`)। GitLab MRs वाला project MR server और उसका token इस्तेमाल करता है; MRs के बिना project अपने HTTPS Git URL के साथ वाली API (`https://host/api/v4`) और Git token इस्तेमाल करता है, इसलिए MRs के बिना भी काम करता रहता है। Token को `api` scope और उस job को चलाने की अनुमति चाहिए, protected environment सहित। Owner के `main` में merge करने के बाद (देखें [main में promote करना](#main-में-promote-करना)), factory:
@@ -524,6 +549,7 @@ project के **"शेड्यूल"** page पर उसके recurring jo
 | Job | एक run क्या करता है |
 |---|---|
 | स्टैंड टेस्टिंग | [stand tester](#stand-tester) से run माँगता है; 8 stand bugs खुले होने पर छोड़ दिया जाता है |
+| स्टैंड पर ऐप बिल्ड | tester से [stand build](#स्टैंड-बिल्ड) माँगता है |
 | बैकलॉग से कार्य | खुले backlog notes को tasks में समूहित करता है; नए notes न होने पर कुछ नहीं होता |
 | main को preprod में मर्ज करें | [`main` को `preprod` में sync करता है](#main-को-वापस-preprod-में-sync-करना) |
 | टास्क | सहेजे गए title, request और priority के साथ एक सामान्य task बनाता है; पिछले run का task अभी खुला हो तो छोड़ दिया जाता है |
@@ -559,6 +585,25 @@ State नामित volumes PostgreSQL, `data` और `repos` में सं
 ### अपडेट करना
 
 `docker compose up -d --build` से अपडेट करें। ताकि tasks को पुराने worker के मौजूदा चरण पूरे करने की प्रतीक्षा न करनी पड़े, worker को `scripts/deploy-worker.sh` से अपडेट करें: नया worker तुरंत काम उठा लेता है, पुराना जो शुरू कर चुका है उसे पूरा करके रुक जाता है। मौजूदा migrations छूटे हुए columns जोड़ते हैं और मौजूदा डेटा सुरक्षित रखते हैं। Rollback के लिए पिछला कोड/images बहाल करें और services restart करें; जोड़े गए columns रह सकते हैं। सामान्य अपडेट में volumes न हटाएँ।
+
+### स्व-अपडेट
+
+सर्वर अपने-आप `origin/main` का अनुसरण कर सकता है। `scripts/self-update.sh` containers के बाहर, host पर systemd timer से चलता है, ताकि खराब version फिर भी rollback हो सके:
+
+1. `origin/main` fetch करें; कुछ नया नहीं, या commit पहले से विफल हो चुका है: रुकें;
+2. नया काम रोकें (`/data/system/hold`), checkout को fast-forward करें, app और executor दोबारा build करें, app restart करें और `scripts/deploy-worker.sh` से नया worker शुरू करें;
+3. 10 मिनट तक इंतज़ार करें, जब तक लगातार दो मिनट तक app जवाब दे और scheduler चलता रहे (`/data/system/worker-heartbeat`) और `Scheduler tick failed` न दिखे;
+4. अन्यथा पिछले commit पर लौटें, दोबारा build और restart करें, और खराब commit को तब तक याद रखें जब तक नया commit न आ जाए।
+
+Local edits या दोबारा लिखा गया `main` update को overwrite करने के बजाय error के साथ रोक देता है। परिणाम `/data/system/self-update.json` में और factory page पर है; log `/data/system/self-update.log` में है। Install:
+
+```sh
+cp scripts/systemd/darkfactory-update.* /etc/systemd/system/
+# set WorkingDirectory in darkfactory-update.service to this checkout
+systemctl daemon-reload && systemctl enable --now darkfactory-update.timer
+```
+
+[स्वचालित promotion](#स्वचालित-promotion) के साथ मिलकर factory अपनी ही repository विकसित करती है, तो वह स्वीकृत बदलाव खुद तक पहुँचाती है।
 
 ## इंटरफ़ेस की भाषाएँ
 

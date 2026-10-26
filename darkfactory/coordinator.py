@@ -61,8 +61,8 @@ def delegate(db, task, plan):
             assignments.update(planner=selected, writer=selected)
         if assignments:
             overrides["profiles"] = assignments
-        if item.get("tier") == "light":
-            overrides["tier"] = "light"
+        if item.get("tier") in ("light", "heavy"):
+            overrides["tier"] = item["tier"]
         else:
             overrides.pop("tier", None)
         for role in ("plan", "implement", "review"):
