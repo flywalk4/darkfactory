@@ -117,3 +117,4 @@ button.subtask-expand:hover{color:#dde3ee;filter:none}
 .factory-tiles{grid-template-columns:repeat(5,1fr)}.factory-tiles .metric em{float:none;display:block;margin-top:8px}
 .factory-bar{display:grid;grid-template-columns:130px 1fr;gap:4px 10px;align-items:center;margin:8px 0;font-size:12px}.factory-bar i{display:block;height:8px;border-radius:4px;background:var(--accent);min-width:2px}.factory-bar small{grid-column:2}
 @media(max-width:700px){.factory-tiles{grid-template-columns:repeat(2,1fr)}}
+.language-picker{display:inline-block;width:auto;margin:0;padding:3px 6px;font-size:10px;background:transparent;color:var(--muted);border-color:var(--line)}.login-language{display:flex;justify-content:flex-end}.login-language .language-picker{font-size:12px;padding:6px 8px}

@@ -10,18 +10,18 @@ function nowLine(t){
   const events=t.events||[],last=kinds=>[...events].reverse().find(e=>kinds.includes(e.kind));
   if(t.state==='running'||t.state==='recovering'){
     const activity=activityLabel(t),fixing=t.phase==='implement'&&t.corrections>0;
-    return (fixing?'Разработчик исправляет замечания ревью':phases[t.phase]||t.phase)+(activity?' · '+activity.text:'');
+    return (fixing?tr('Разработчик исправляет замечания ревью'):phases[t.phase]||t.phase)+(activity?' · '+activity.text:'');
   }
-  if(t.state==='needs_human')return t.awaits_director?'Решает директор':'Нужно твоё решение'+(t.reason?': '+reasonLabel(t.reason):'');
-  if(t.waiting_for)return 'Ждёт '+t.waiting_for;
+  if(t.state==='needs_human')return t.awaits_director?tr('Решает директор'):t.reason?tr('Нужно твоё решение: {reason}',{reason:reasonLabel(t.reason)}):tr('Нужно твоё решение');
+  if(t.waiting_for)return tr('Ждёт {what}',{what:t.waiting_for});
   if(t.state==='queued'){
     const correction=last(['correction','phase_started']);
-    if(correction?.kind==='correction'){const n=blockingFindings(correction.message);return `Ревью вернуло${n?' '+n+' замеч.':''}, разработчик исправит`;}
-    return 'В очереди: '+(phases[t.phase]||t.phase);
+    if(correction?.kind==='correction'){const n=blockingFindings(correction.message);return n?tr('Ревью вернуло {n} замеч., разработчик исправит',{n}):tr('Ревью вернуло, разработчик исправит');}
+    return tr('В очереди: {phase}',{phase:phases[t.phase]||t.phase});
   }
-  if(t.state==='review_required')return 'Ревью одобрило, нужно твоё слияние в preprod';
-  if(t.state==='merged')return t.promotion?.state==='pending'?'Слита в preprod, ждёт переноса в main':'Слита в preprod';
-  if(t.state==='cancelled')return 'Отменена'+(t.reason?': '+t.reason:'');
+  if(t.state==='review_required')return tr('Ревью одобрило, нужно твоё слияние в preprod');
+  if(t.state==='merged')return t.promotion?.state==='pending'?tr('Слита в preprod, ждёт переноса в main'):tr('Слита в preprod');
+  if(t.state==='cancelled')return t.reason?tr('Отменена: {reason}',{reason:t.reason}):tr('Отменена');
   return names[t.state]||t.state;
 }
 
@@ -42,6 +42,6 @@ function renderAttention(taskList){
   const box=$('#attention');if(!box)return;
   const items=taskList.filter(t=>(t.state==='needs_human'&&!t.awaits_director)||t.state==='review_required');
   box.hidden=!items.length;if(!items.length){box.innerHTML='';return;}
-  box.innerHTML=`<div class="main-pending-head"><b>Ждут тебя: ${items.length}</b><span>Директор не решил это сам или нужно твоё слияние.</span></div><div class="main-pending-list">${items.map(t=>`<button class="main-pending-item attention-item" data-attention="${t.id}"><span>${esc(t.title)}</span><small>${esc(t.state==='review_required'?'Слить в preprod':reasonLabel(t.reason)||'Нужно решение')}</small></button>`).join('')}</div>`;
+  box.innerHTML=`<div class="main-pending-head"><b>${tr('Ждут тебя: {n}',{n:items.length})}</b><span>${tr('Директор не решил это сам или нужно твоё слияние.')}</span></div><div class="main-pending-list">${items.map(t=>`<button class="main-pending-item attention-item" data-attention="${t.id}"><span>${esc(t.title)}</span><small>${esc(t.state==='review_required'?tr('Слить в preprod'):reasonLabel(t.reason)||tr('Нужно решение'))}</small></button>`).join('')}</div>`;
   box.querySelectorAll('[data-attention]').forEach(b=>b.onclick=()=>showDetail(b.dataset.attention).catch(error=>toast(error.message)));
 }

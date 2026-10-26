@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Darkfactory</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css?v=20261028-factory">
+  <title>Darkfactory</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css?v=20261028-i18n">
   <link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/chat.css?v=20261022-images">
   <link rel="stylesheet" href="/static/registry.css"><link rel="stylesheet" href="/static/backlog.css?v=20261025-disk2"><link rel="stylesheet" href="/static/transcript.css?v=20261026-diff2"><link rel="stylesheet" href="/static/attach.css?v=20261022-attach">
 </head>
@@ -12,7 +12,8 @@
     <p>Твоя команда разработки. Свои проекты. Своя инфраструктура.</p>
     <form id="login-form"><label>Токен доступа<input id="token" type="password" required autocomplete="current-password" placeholder="Вставь токен владельца"></label>
       <button>Войти →</button></form>
-    <p class="muted small">Первый токен: <code>DARKFACTORY_ADMIN_TOKEN</code> из <code>.env</code> или <code>docker compose exec app cat /data/bootstrap-token</code></p>
+    <p class="muted small" data-i18n-html>Первый токен: <code>DARKFACTORY_ADMIN_TOKEN</code> из <code>.env</code> или <code>docker compose exec app cat /data/bootstrap-token</code></p>
+    <div class="login-language" data-language-picker></div>
   </div>
 </div>
 <div id="shell" hidden>
@@ -29,7 +30,7 @@
     </nav>
     <div class="nav-label projects-title">ПРОЕКТЫ <button id="add-project" title="Добавить проект">+</button></div>
     <div id="project-list"></div>
-    <footer><span class="dot"></span> Своя инфраструктура <button id="logout" class="quiet">Выйти</button></footer>
+    <footer><span class="dot"></span> Своя инфраструктура <span data-language-picker></span> <button id="logout" class="quiet">Выйти</button></footer>
   </aside>
   <main>
     <header><div class="breadcrumbs">Рабочее пространство <span>/</span> <b id="current-project">Проекты</b></div><span class="private">◉ PRIVATE</span></header>
@@ -40,7 +41,7 @@
       <div id="attention" class="main-pending attention" hidden></div>
       <div id="main-pending" class="main-pending" hidden></div>
       <div class="board-heading"><h2>Все задачи <span id="task-count">0</span></h2><div class="legend"><span class="dot"></span> Обновляется автоматически</div></div>
-      <div id="empty" class="empty" hidden><div class="empty-symbol">↗</div><h2>Начни с проекта</h2><p>Подключи Git-репозиторий и пул исполнителей.<br>Потом поставь первую задачу.</p><button id="empty-add">Подключить проект</button></div>
+      <div id="empty" class="empty" hidden><div class="empty-symbol">↗</div><h2>Начни с проекта</h2><p data-i18n-html>Подключи Git-репозиторий и пул исполнителей.<br>Потом поставь первую задачу.</p><button id="empty-add">Подключить проект</button></div>
       <div id="board" class="board"></div>
     </section>
     <section id="agents-view" hidden><div id="agent-workspace"></div></section>
@@ -53,13 +54,14 @@
       <section class="panel"><div class="panel-title"><h2>Подключения</h2><div><button id="connect-subscription">+ Подписка</button> <button id="add-connection" class="secondary">Реквизиты / API</button></div></div><div id="subscription-sessions"></div><div id="connections"></div></section>
       <section class="panel"><div class="panel-title"><h2>Уведомления человеку</h2></div><div id="notification-channels"></div></section>
       <section class="panel"><div class="panel-title"><h2>Доступ к команде</h2><button id="add-member">+ Участник</button></div><div id="members"></div></section>
-      <section class="panel"><h2>Правила фабрики</h2><p>Автослияние только в <code>preprod</code>, после обязательных проверок и отдельного ревью.</p><p>Без проверок — только запись изменений. Перенос в основную ветку и production выполняет человек.</p><p>Платный API требует бюджета и явного назначения роли либо включённой владельцем политики перехода.</p><a href="/docs" target="_blank" rel="noopener">Документация API ↗</a><p><button id="add-organization" class="secondary">Новая организация</button></p><div id="tokens"></div></section></div>
+      <section class="panel"><h2>Правила фабрики</h2><p data-i18n-html>Автослияние только в <code>preprod</code>, после обязательных проверок и отдельного ревью.</p><p>Без проверок — только запись изменений. Перенос в основную ветку и production выполняет человек.</p><p>Платный API требует бюджета и явного назначения роли либо включённой владельцем политики перехода.</p><a href="/docs" target="_blank" rel="noopener">Документация API ↗</a><p><button id="add-organization" class="secondary">Новая организация</button></p><div id="tokens"></div></section></div>
     </section>
   </main>
 </div>
 <dialog id="modal"><form id="modal-form"><div class="dialog-heading"><h2 id="modal-title"></h2><button type="button" id="close-modal" class="quiet">✕</button></div><div id="modal-fields"></div><div id="form-error" class="error"></div><div class="dialog-actions"><button type="button" id="cancel-modal" class="secondary">Отмена</button><button id="submit-modal">Сохранить</button></div></form></dialog>
 <dialog id="detail"><div class="dialog-heading"><h2 id="detail-title"></h2><button id="close-detail" class="quiet">✕</button></div><div id="detail-body"></div></dialog>
 <div id="toast" role="status" hidden></div>
+<script src="/static/i18n.js?v=20261026-i18n" defer></script>
 <script src="/static/attach.js?v=20261022-attach" defer></script>
 <script src="/static/app.js?v=20261028-factory" defer></script>
 <script src="/static/backlog.js?v=20261025-disk" defer></script>

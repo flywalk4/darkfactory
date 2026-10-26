@@ -1,10 +1,72 @@
+<div align="center">
+
 # Darkfactory
 
-Self-hosted фабрика разработки: общий интерфейс и API, организации и изолированные проекты, очередь PostgreSQL и отдельные контейнеры задач. Фабрика планирует работу, пишет код, запускает обязательные проверки и независимое ревью. Проверенные изменения автоматически попадают только в `preprod`. Основную ветку и production обновляет человек.
+**A self-hosted AI software factory: it plans the work, writes the code, runs mandatory checks and an independent review, and ships only to `preprod`.**
 
-## Запуск
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](compose.yaml)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 
-Нужен Docker Engine с Docker Compose и поддержкой `volume.subpath`. На macOS подходит Docker Desktop. Пароля PostgreSQL по умолчанию нет: без `POSTGRES_PASSWORD` в `.env` Compose не запустится. Установка, созданная раньше, использовала пароль `darkfactory-local`: укажи его в `.env`, затем смени пароль в PostgreSQL (`ALTER USER darkfactory PASSWORD …`) и в `.env`. Для новой установки из каталога проекта:
+**English** · [Русский](docs/readme/README.ru.md) · [中文](docs/readme/README.zh.md) · [हिन्दी](docs/readme/README.hi.md) · [Español](docs/readme/README.es.md) · [العربية](docs/readme/README.ar.md) · [Français](docs/readme/README.fr.md) · [বাংলা](docs/readme/README.bn.md) · [Português](docs/readme/README.pt.md) · [日本語](docs/readme/README.ja.md)
+
+</div>
+
+Darkfactory gives you one shared UI and API, organizations with isolated projects, a PostgreSQL-backed queue, and a separate container for every task. Verified changes land automatically in `preprod` only. A human updates the main branch and production.
+
+## Why Darkfactory
+
+- 🏭 **Self-hosted.** One UI and API, organizations and isolated projects, a PostgreSQL queue and a dedicated container per task.
+- 🛡️ **Ships only to `preprod`.** Production and the main branch are updated by a human, never by the factory.
+- ✅ **Mandatory checks and independent review.** Checks and review are bound to one final commit. Without configured checks, automatic merge is off.
+- 🔒 **Isolated task containers.** Non-root, read-only root filesystem, limited CPU/RAM/PIDs, network disabled, no access to the Docker socket, PostgreSQL, other projects or production secrets.
+- 🔀 **Subscription pools with fallback.** Codex for development and Claude for review by default; account and engine switching with quota awareness; paid API only by explicit opt-in with a money budget.
+- 🧠 **Factory Director.** A chat (web and CLI) that creates projects, roles and tasks, and resolves stalled tasks within the user's own permissions.
+
+## Task pipeline
+
+```mermaid
+flowchart LR
+    A[Task] --> B["Plan<br/>optional: Large task"]
+    B --> C[Implement]
+    A --> C
+    C --> D[Mandatory checks]
+    D --> E[Independent review]
+    E -->|defects| C
+    E -->|accepted| F[Merge to preprod]
+    F --> G[Human promotes<br/>to main / production]
+```
+
+By default a task goes straight to a single developer, with no plan and no subtasks. A plan with blocking questions stops until you answer.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Your first project](#your-first-project)
+- [Executor connections](#executor-connections)
+- [Isolation and dependencies](#isolation-and-dependencies)
+- [Initializing an existing project](#initializing-an-existing-project)
+- [Project artifacts](#project-artifacts)
+- [Roles, delegation, skills and MCP](#roles-delegation-skills-and-mcp)
+- [Factory Director](#factory-director)
+- [Human notifications](#human-notifications)
+- [Limits and incidents](#limits-and-incidents)
+- [Implementation checks](#implementation-checks)
+- [Browser UI testing](#browser-ui-testing)
+- [API and data](#api-and-data)
+- [Interface languages](#interface-languages)
+- [License](#license)
+
+## Quick start
+
+You need Docker Engine with Docker Compose and `volume.subpath` support. Docker Desktop works on macOS.
+
+> [!IMPORTANT]
+> There is no default PostgreSQL password: without `POSTGRES_PASSWORD` in `.env`, Compose will not start. An installation created earlier used the password `darkfactory-local`: put it in `.env`, then change the password in PostgreSQL (`ALTER USER darkfactory PASSWORD …`) and in `.env`.
+
+For a new installation, from the project directory:
 
 ```sh
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> .env
@@ -12,127 +74,276 @@ docker compose up -d --build
 docker compose exec app cat /data/bootstrap-token
 ```
 
-Открой [localhost:8080](http://localhost:8080) и вставь токен владельца. Вместо сгенерированного файла можно задать токен владельца сам: `echo "DARKFACTORY_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env` до первого запуска. Новое значение переменной после перезапуска заменяет прежний токен из `.env`. В уже работающей установке переменная добавляется владельцу из `/data/bootstrap-token`. Отозванный токен из `.env` не восстанавливается: задай новое значение. Первичная сборка скачивает Python, Node, PostgreSQL, Codex CLI и Claude Code. Последующие запуски используют собранные образы.
+Open [localhost:8080](http://localhost:8080) and paste the owner token.
 
-Сервисы: `app` обслуживает UI/API, `worker` управляет задачами, `db` хранит очередь. `executor-image` собирает образ для временных контейнеров. Docker socket доступен только доверенному worker; задача его не получает.
+- **Set the owner token yourself.** Instead of the generated file, run `echo "DARKFACTORY_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env` before the first start.
+- **Changing it later.** After a restart, a new value of the variable replaces the previous token from `.env`. In an already running installation the variable is added to the owner from `/data/bootstrap-token`. A revoked token from `.env` is not restored: set a new value.
+- **First build.** It downloads Python, Node, PostgreSQL, Codex CLI and Claude Code. Later starts use the built images.
 
-Настройки Compose через `.env`: `PORT`, `BIND_ADDRESS` (по умолчанию `127.0.0.1`), `POSTGRES_PASSWORD`, `GLOBAL_CONCURRENCY` (4), `EXECUTOR_CPUS` (4 CPU на контейнер задачи), `DATA_VOLUME`. Для доступа сотрудников поставь HTTPS reverse proxy перед приложением. PostgreSQL наружу не публикуется.
+### Services
 
-## Первый проект
+| Service | Purpose |
+|---|---|
+| `app` | Serves the UI and API |
+| `worker` | Manages tasks |
+| `db` | Stores the queue (PostgreSQL) |
+| `executor-image` | Builds the image for temporary task containers |
 
-1. Нажми «Подключить проект»: укажи название, Git-репозиторий и при необходимости токен доступа.
-2. Менеджер, аналитик, разработчик и ревьюер со стандартными скиллами появятся сразу. Роли наследуют исполнителей проекта: Codex для разработки и Claude для ревью. MCP подключаются отдельно.
-3. Подписки подключай в общий пул организации. Если пул уже есть, новый проект использует его; иначе фабрика создаёт «Общий пул». Проекты могут позже выбрать отдельные пулы в настройках.
-4. В настройках проекта задай обязательные команды проверок. Без них автоматическое слияние выключено.
-5. Создай задачу в UI или через API. План с блокирующими вопросами остановится до твоего ответа.
+The Docker socket is available only to the trusted worker; a task does not get it.
 
-Поддерживаются HTTPS Git, SSH и локальные bare-репозитории в `/repos`. GitHub/GitLab, включая свои домены, получают PR/MR. Для остальных Git создаётся внутренняя запись изменений с diff, проверками и ревью. SSH требует отдельный ключ и явно заданный `known_hosts`; ключи хоста не наследуются.
+### Configuration
 
-Для локальных проектов используй общий том `repos`, смонтированный в app и worker как `/repos`. Создать репозиторий можно через `docker compose exec worker sh`; тестовый сценарий ниже показывает полный пример. Каталоги хоста в контейнер задачи не монтируются.
+Compose settings are read from `.env`:
 
-При отсутствии команд проверок задача заканчивается записью изменений и состоянием `review_required`: автослияние запрещено. Проверки и ревью привязаны к одному итоговому коммиту. Изменение вершины `preprod` запускает повторную интеграцию и приёмку. Слияния проекта идут последовательно.
+| Variable | Meaning | Default |
+|---|---|---|
+| `PORT` | Published port | `8080` (per `compose.yaml`) |
+| `BIND_ADDRESS` | Address the port binds to | `127.0.0.1` |
+| `POSTGRES_PASSWORD` | PostgreSQL password | none, required |
+| `GLOBAL_CONCURRENCY` | Global task concurrency | `4` |
+| `EXECUTOR_CPUS` | CPUs per task container | `4` |
+| `DATA_VOLUME` | Name of the `data` volume | `darkfactory_data` (per `compose.yaml`) |
+| `DARKFACTORY_ADMIN_TOKEN` | Owner token chosen by you | generated into `/data/bootstrap-token` |
+| `DARKFACTORY_PERSONAL_MODE` | Personal local pilot mode (see [Executor connections](#executor-connections)) | `0` |
+| `DARKFACTORY_PUBLIC_URL` | Factory address used in notification links | `http://127.0.0.1:8080` |
 
-Роли: владелец управляет настройками и подключениями, оператор — задачами, наблюдатель читает. Права участника и токена пересекаются; отзыв прав применяется к последующим запросам. Новая организация получает отдельного владельца и одноразово показанный токен. Владелец выпускает токены участникам в настройках («Доступ к команде») или через `POST /api/members`; участников с ролью `owner` может быть несколько. Свои дополнительные токены выпускает `POST /api/tokens`, отзывает `DELETE /api/tokens/{id}`.
+> [!WARNING]
+> For employee access, put an HTTPS reverse proxy in front of the application. PostgreSQL is not published externally.
 
-## Подключения исполнителей
+## Your first project
 
-- **Codex для компании**: JSON credentials `{"auth_method":"siwc","accessToken":"..."}`. Используется документированный внешний OAuth provider для App Server. Нужен токен Sign in with ChatGPT с доступом к этому сценарию. Обновление токена выполняется через reconnect.
-- **Claude Code**: `{"oauth_token":"..."}` для разрешённого подписочного подключения. Изолированная сессия получает только выбранный токен; `--bare` не используется.
-- **API**: HTTPS OpenAI-compatible Chat Completions с tool calls. Укажи модель и `{"base_url":"https://example.com/v1","api_key":"...","input_usd_per_million":0.0,"output_usd_per_million":0.0}` с действительными ценами. Для собственного TLS CA доступно поле `ca_cert`.
+1. Click **"Connect project"** and enter a name, a Git repository and, if needed, an access token.
+2. A manager, analyst, developer and reviewer with the standard skills appear immediately. Roles inherit the project's executors: Codex for development and Claude for review. MCP servers are connected separately.
+3. Connect subscriptions to the organization's shared pool. If a pool already exists, the new project uses it; otherwise the factory creates a "Shared pool". Projects can later pick dedicated pools in their settings.
+4. In the project settings, define the mandatory check commands. Without them, automatic merge is off.
+5. Create a task in the UI or through the API. A plan with blocking questions stops until you answer.
 
-Для личного локального пилота можно использовать текущий вход `codex login` через ChatGPT. Добавь `DARKFACTORY_PERSONAL_MODE=1` в локальный `.env`, выполни `docker compose up -d --build`, затем запусти на хосте `python3 scripts/connect_personal_codex.py`. Скрипт создаст пул `Personal Codex` и подключение в организации bootstrap-токена. Назначь этот пул проекту; отдельная сессия Codex может также выполнять ревью.
+### Supported repositories
 
-Импортируется только access token и ID аккаунта из `~/.codex/auth.json`; refresh token и каталог хоста в контейнеры не передаются. Токен хранится зашифрованно. После истечения или отзыва токена повтори импорт при свободном подключении. По умолчанию личный режим выключен, а размещаемая или коммерческая установка использует SIWC. Область использования встроенной авторизации описана в [официальной документации App Server](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
+HTTPS Git, SSH and local bare repositories in `/repos` are supported. GitHub and GitLab, including self-hosted domains, get PRs/MRs. For any other Git, the factory creates an internal change record with the diff, checks and review. SSH requires a dedicated key and an explicitly set `known_hosts`; host keys are not inherited.
 
-Если личный Codex уже работает через локальный шлюз подписки, передай его адрес, доступный из Docker, и настроенную модель: `python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model ИМЯ_МОДЕЛИ`. Этот режим принимает только локальные HTTP-адреса и требует `DARKFACTORY_PERSONAL_MODE=1`. Исполнитель подключается к указанному шлюзу через фиксированный туннель и прежний список разрешённых адресов; сеть контейнера остаётся `none`. Платный API этим режимом не включается.
+For local projects, use the shared `repos` volume, mounted into app and worker as `/repos`. You can create a repository with `docker compose exec worker sh`; the test scenario [below](#implementation-checks) shows a full example. Host directories are not mounted into the task container.
 
-Пулы задают приоритеты, модели, доступные движки, параллельность, число переключений и паузу повторной проверки квоты. Базовый выбор — Codex для разработки и Claude для ревью. Переключение аккаунта и Codex ↔ Claude разрешено; API по умолчанию автоматически не подключается. Для платного fallback владелец явно включает политику проекта, а задача получает денежный бюджет. Явно назначенный API также требует бюджета.
+### Merge behavior
 
-Кнопка **«+ Подписка»** запускает штатный вход Claude через ссылку и одноразовый браузерный код. В персональном режиме доступен Codex device-auth: ссылка и код появляются в той же форме. Выбери пулы перед входом; после подтверждения аккаунт добавится автоматически. Можно закрыть форму и продолжить незавершённый вход из настроек. Вход действует не более 15 минут, поддерживает отмену и выполняется в отдельном контейнере. OAuth-токены не передаются браузеру. Автоматическое обновление истёкших токенов не реализовано; повтори вход или reconnect.
+- When no checks are configured, the task ends with a change record and the `review_required` state: automatic merge is forbidden.
+- Checks and review are bound to one final commit.
+- A change to the `preprod` tip triggers re-integration and acceptance.
+- Project merges run sequentially.
 
-По умолчанию пул сохраняет резерв **10%**, считает наблюдение свежим **300 секунд** и допускает неизвестную квоту. Свежая известная квота ниже резерва исключает подписку; среди подходящих аккаунтов выбранного движка преимущество имеет больший подтверждённый остаток. Настройки резерва, срока снимка и обязательной известной квоты доступны в форме пула. Персональный Codex перепроверяет лимиты перед обращением к модели. У провайдеров без доступных данных строгая политика ждёт подтверждённого остатка. Лимиты могут измениться во время работы: сохранение кода и передача контекста позволяют продолжить с другим аккаунтом.
+### Access roles
 
-При переключении передаются код и артефакты, а не внутренняя сессия аккаунта. Квоты и занятость учитываются по подключению, включая известную общую группу `quota_group`; повторное подключение тех же credentials не создаёт новую квоту. Неизвестный остаток не объявляется безлимитным. Ошибка авторизации требует reconnect, квота — ожидания контрольной проверки.
+| Role | Can |
+|---|---|
+| Owner | Manage settings and connections |
+| Operator | Manage tasks |
+| Observer | Read |
 
-Если исполнитель сообщает остаток квоты и время сброса, фабрика сохраняет их и показывает в настройках подключений вместе со временем наблюдения. Это последний полученный снимок, а не непрерывный опрос аккаунта. При отсутствии данных отображается «остаток квоты неизвестен». Переподключение с новыми credentials очищает прежний снимок. Время контрольной попытки показывается отдельно от сообщённого провайдером времени сброса.
+Member and token permissions intersect; revoking permissions applies to subsequent requests. A new organization gets its own owner and a one-time displayed token. The owner issues member tokens in the settings ("Team access") or through `POST /api/members`; there can be several members with the `owner` role. Additional tokens of your own are issued with `POST /api/tokens` and revoked with `DELETE /api/tokens/{id}`.
 
-Официальные основания интеграции: [Codex App Server](https://learn.chatgpt.com/docs/app-server), [внешние токены SIWC](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server), [Claude Code headless](https://code.claude.com/docs/en/headless). Наличие адаптера не подтверждает доступность подписочного сценария для конкретной компании: нужны разрешённые подключения.
+## Executor connections
 
-## Изоляция и зависимости
+| Connection | Credentials and notes |
+|---|---|
+| **Codex for company** | JSON credentials `{"auth_method":"siwc","accessToken":"..."}`. Uses the documented external OAuth provider for App Server. Requires a Sign in with ChatGPT token with access to this scenario. Refresh the token through reconnect. |
+| **Claude Code** | `{"oauth_token":"..."}` for a permitted subscription connection. The isolated session receives only the selected token; `--bare` is not used. |
+| **API** | HTTPS OpenAI-compatible Chat Completions with tool calls. Specify the model and `{"base_url":"https://example.com/v1","api_key":"...","input_usd_per_million":0.0,"output_usd_per_million":0.0}` with real prices. A `ca_cert` field is available for a custom TLS CA. |
 
-Задача получает отдельную рабочую копию и ветку, non-root контейнер, read-only root filesystem, ограниченные CPU/RAM/PID и внутренний дедлайн. `.git` защищён от записи агента. Проверяющий получает рабочую копию только для чтения. Доступа к Docker socket, PostgreSQL, другим проектам и production-секретам нет.
+### Personal local pilot
 
-Сеть контейнера отключена. HTTPS доступен через CONNECT proxy только к выбранному провайдеру и явно разрешённым `host:port` проекта. Проверки по умолчанию офлайн. Тестовые секреты передаются отдельно; proxy не открывает произвольный доступ к хосту.
+For a personal local pilot you can use the current `codex login` through ChatGPT.
 
-Образ содержит Python, Node и Git. Если проекту нужны другие зависимости, собери свой образ от `darkfactory-executor:local`, установи зависимости заранее и укажи `executor_image` в настройках проекта. Разрешённые тестовые endpoints и `test_env` настраивает владелец. Имена в `test_env` — только `TEST_*`, `APP_*` или `E2E_*`. Адреса `allowed_hosts`, Git remote и сервер PR/MR должны быть полными именами; внутренний адрес (loopback, частная сеть, link-local, CGNAT) проходит, только если его точный `ip:port` указан в `allowed_hosts`. Production deployment не реализован.
+1. Add `DARKFACTORY_PERSONAL_MODE=1` to the local `.env`.
+2. Run `docker compose up -d --build`.
+3. On the host, run `python3 scripts/connect_personal_codex.py`. The script creates the `Personal Codex` pool and a connection in the bootstrap token's organization.
+4. Assign this pool to a project; a separate Codex session can also perform reviews.
 
-Связи задач: `depends_on`, родитель → подзадача (`parent`), `related_to`, подтверждённый `duplicate`. Кодовая зависимость ждёт принятого результата в `preprod`; артефактная может принять конкретный проверенный коммит. Циклы и межорганизационные связи запрещены. Родитель ждёт обязательные дочерние задачи и собственную интеграционную проверку.
+Only the access token and account ID from `~/.codex/auth.json` are imported; the refresh token and the host directory are not passed into containers. The token is stored encrypted. After the token expires or is revoked, repeat the import while the connection is idle. Personal mode is off by default, and a hosted or commercial installation uses SIWC. The scope of the built-in authorization is described in the [official App Server documentation](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
 
-По умолчанию задача сразу идёт к одному разработчику, без плана и подзадач. Ревью возвращает на доработку только за дефекты и невыполненные критерии; улучшения помечаются `[LATER]` и попадают в бэклог. Для задачи, помеченной «Большая задача», планировщик может сам создать до восьми подзадач с критериями приёмки и зависимостями. Независимые дети получают отдельные рабочие каталоги и могут выполняться параллельно. Вложенное автоматическое разбиение запрещено. Перед собственной реализацией родитель собирает принятый код детей. Время, исправления, переключения и деньги ограничены общим бюджетом дерева; создание детей не умножает лимиты. Параллельные запуски резервируют доли оставшегося времени. Отмена родителя отменяет созданных им агентов; отменённые дети не возобновляются автоматически.
+If your personal Codex already works through a local subscription gateway, pass its Docker-reachable address and the configured model:
 
-Принятые SHA зависимостей сохраняются в задаче. Смена SHA или отзыв принятого результата останавливает текущего исполнителя и сбрасывает старые проверки и ревью. После разблокировки задача повторяет сборку входов, реализацию и приёмку, сохраняя рабочий код и накопленные счётчики. Перед слиянием проверка зависимостей и Git-операция выполняются под общим контроллерным замком, чтобы изменение входов не проскочило между ними.
+```sh
+python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
+```
 
-## Первичная инициализация существующего проекта
+This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
 
-При добавлении проекта по умолчанию включена **«Первичная индексация и Markdown-документы»**. Фабрика ставит обычную задачу в очередь: сначала сохраняет карту отслеживаемых Git-файлов, затем исполнитель изучает репозиторий и создаёт или дополняет четыре файла:
+### Pools and engine selection
 
-- `docs/darkfactory/INDEX.md` — карта проекта, точки входа и назначение модулей;
-- `docs/darkfactory/ARCHITECTURE.md` — компоненты, зависимости, данные и границы системы;
-- `docs/darkfactory/DEVELOPMENT.md` — установка, запуск, конфигурация и проверки;
-- `docs/darkfactory/CONTRACTS.md` — найденные API, события и внешние интеграции.
+Pools define priorities, models, available engines, concurrency, the number of switches and the pause before re-checking quota. The baseline choice is Codex for development and Claude for review. Switching accounts and switching Codex ↔ Claude is allowed; the API is not connected automatically by default. For a paid fallback, the owner explicitly enables a project policy and the task gets a money budget. An explicitly assigned API also requires a budget.
 
-Исходная карта с SHA находится также в артефактах задачи: `repository-index.md`. В ней перечислены первые 1000 отслеживаемых файлов и полное количество. Исполнитель должен подтверждать выводы файлами проекта, сохранять полезную существующую документацию и отмечать неизвестное. Изменения вне четырёх документов запрещены проверкой worker.
+The **"+ Subscription"** button starts the standard Claude login through a link and a one-time browser code. In personal mode, Codex device-auth is available: the link and code appear in the same form. Pick pools before signing in; after confirmation the account is added automatically. You can close the form and resume an unfinished sign-in from the settings. A sign-in is valid for at most 15 minutes, can be cancelled, and runs in a separate container. OAuth tokens are never passed to the browser. Automatic refresh of expired tokens is not implemented; repeat the sign-in or reconnect.
 
-Задача использует подключения, лимиты, проверки и независимое ревью проекта. Если подключений ещё нет, она ждёт их настройки. Документы проходят обычный Git-конвейер: при наличии успешных обязательных проверок изменения сливаются в `preprod`; без настроенных проверок остаются на ручное слияние. После ревью все четыре документа появляются в реестре как **черновики**, с задачей-источником и SHA проверенного коммита. Владелец принимает нужные версии явно; существующие принятые версии сохраняются.
+| Pool default | Value |
+|---|---|
+| Reserve kept | **10%** |
+| Observation counts as fresh for | **300 seconds** |
+| Unknown quota | allowed |
 
-Для ранее подключённого проекта открой **«Артефакты проекта» → «Индексировать проект»**. Кнопка доступна владельцу и открывает существующую задачу инициализации, если она уже создана, без дублей. Создание проекта через API принимает `initialize` (по умолчанию `true`); `false` отключает автоматический запуск. Для существующего проекта: `POST /api/projects/{id}/initialize`.
+- A fresh, known quota below the reserve excludes the subscription. Among suitable accounts of the selected engine, the one with the larger confirmed remainder is preferred.
+- The reserve, snapshot age and "known quota required" settings are in the pool form.
+- Personal Codex re-checks limits before calling the model.
+- For providers without available data, the strict policy waits for a confirmed remainder.
+- Limits can change while work is running: saving the code and handing over the context lets work continue with another account.
 
-## Артефакты проекта
+On a switch, the code and artifacts are handed over, not the account's internal session. Quota and occupancy are tracked per connection, including a known shared `quota_group`; reconnecting the same credentials does not create a new quota. An unknown remainder is never declared unlimited. An authorization error requires reconnect; a quota error requires waiting for the control check.
 
-Открой **«Артефакты проекта»** и добавь требования, аналитику, архитектуру, контракт API, отчёт или другой текстовый документ. У артефакта постоянный ключ в пределах проекта, название и история неизменяемых версий. Содержимое хранится в БД; редактирование создаёт новую версию. Это отдельный реестр знаний проекта, который дополняет рабочие файлы задач (`plan.md`, `diff.patch`, `checks.txt`, `review.txt`, `handoff.md`) и браузерные доказательства.
+When an executor reports its remaining quota and reset time, the factory stores them and shows them in the connection settings together with the observation time. This is the last received snapshot, not continuous polling of the account. When no data is available, "remaining quota unknown" is displayed. Reconnecting with new credentials clears the previous snapshot. The time of the control attempt is shown separately from the reset time reported by the provider.
 
-Оператор добавляет черновики, владелец принимает выбранную версию или отзывает приёмку, наблюдатель читает. Одновременно принята одна версия каждого артефакта. При желании укажи задачу-источник: она должна иметь актуальный коммит с независимым ревью. Версия сохраняет ID задачи и SHA; смена результата источника или его входов делает документ устаревшим. Обычные документы публикуются через форму или API; инициализация проекта автоматически добавляет свои документы после ревью.
+### Deleting pools
 
-При создании задачи выбери принятые версии. В карточке остановленной задачи можно добавить, заменить или убрать вход. Задача получает полный текст именно выбранных версий, их ключи, номера и SHA источников. Делегированные подзадачи наследуют эти версии. Лимиты: 100 000 символов в версии, до 10 входов и 200 000 символов суммарно на задачу.
+Pools can be deleted in the settings or through `DELETE /api/pools/{id}`, including through the Director. Deletion is available to the owner of the whole organization. Subscriptions, authorization and membership in other pools are preserved. If the pool is assigned to a project, first select another pool for development and review. An unfinished subscription sign-in must also be completed or cancelled before deletion.
 
-Принятие новой версии не меняет выбор задач автоматически: потребители старой версии ждут явной замены входа. Отзыв приёмки и устаревший источник также блокируют выполнение. Фабрика сбрасывает проверки и ревью прежних входов, останавливает активного исполнителя и проверяет входы повторно перед слиянием. Рабочий код и накопленные счётчики сохраняются. Карточка артефакта показывает историю, задачи-источники и потребителей; прежние версии остаются доступны для чтения.
+### Official basis
 
-API: `GET/POST /api/projects/{id}/artifacts`, `POST /api/project-artifacts/{id}/versions`, `GET /api/project-artifacts/{id}/versions/{version_id}`, `POST …/versions/{version_id}/accept`, `POST /api/project-artifacts/{id}/revoke`. Входы задачи: `GET /api/tasks/{id}/artifact-inputs`, `PUT/DELETE /api/tasks/{id}/artifact-inputs/{artifact_id}`. Создание задачи принимает `artifact_version_ids`. Доступ ограничен организацией, проектами пользователя и областью токена; циклы с обычными зависимостями запрещены. Новые таблицы создаются при старте без изменения существующих задач.
+[Codex App Server](https://learn.chatgpt.com/docs/app-server), [SIWC external tokens](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server), [Claude Code headless](https://code.claude.com/docs/en/headless).
 
-## Роли, делегирование, скиллы и MCP
+> [!NOTE]
+> The existence of an adapter does not confirm that the subscription scenario is available to a particular company: you need permitted connections.
 
-Открой **«Агенты, скиллы и MCP»** в левом меню и выбери проект. Кнопка **«Добавить готовую команду»** устанавливает проектного агента, аналитика, разработчика и ревьюера. Во вкладках **«Роли»**, **«Скиллы»** и **«MCP»** доступны каталоги: добавляй готовые настройки кнопками, подключай скиллы и инструменты к роли через списки. Инструкции, движок и модель можно изменить в карточке роли. Профили также можно назначить отдельной задаче.
+## Isolation and dependencies
 
-Проектный агент при планировании создаёт подзадачи и назначает им `agent_profile`. Для сценария «анализ → разработка» создай профили `analyst` и `developer`: подзадача разработчика указывает ключ анализа в `depends_on`. Разработчик начнёт работу после проверенного слияния анализа в `preprod` и получит принятый коммит и артефакты. Аналитик сохраняет результат в репозитории. Каждый агент с разрешением делегирования может создавать следующие подзадачи в пределах настроенной глубины и общего количества. По умолчанию глубина — 2, максимум подзадач дерева — 16, прямых подзадач одного плана — 8. Время, исправления и денежный бюджет общие для дерева.
+A task gets its own working copy and branch, a non-root container, a read-only root filesystem, limited CPU/RAM/PIDs and an internal deadline. `.git` is write-protected for the agent. The verifier gets the working copy read-only. There is no access to the Docker socket, PostgreSQL, other projects or production secrets.
 
-Каталог содержит семь скиллов и четыре MCP: браузер, чтение/поиск файлов проекта, чтение Git status/diff/log и Jira. Первые три работают внутри контейнера задачи и не требуют внешнего сервера.
+The container network is disabled. HTTPS is available through a CONNECT proxy only to the selected provider and the project's explicitly allowed `host:port` entries. Checks are offline by default. Test secrets are passed separately; the proxy does not open arbitrary host access.
 
-MCP **Jira** (`mcp-atlassian`, установлен в образе исполнителя) читает задачи, JQL-поиск, доски и спринты Jira Server/Data Center или Cloud; инструменты записи выключены и в шлюзе, и в самом сервере (`--read-only`). После добавления из каталога открой его карточку и заполни:
+> [!WARNING]
+> Production deployment is not implemented. The factory delivers only to `preprod`.
 
-- **Адреса, к которым нужен доступ:** `jira.example.com:443`. Без этого egress задачи не пустит сервер к Jira, в том числе на частный адрес.
-- **Секретное окружение:** `JIRA_URL=https://jira.example.com` и `JIRA_PERSONAL_TOKEN=<PAT>` (Jira → Профиль → Personal Access Tokens). Для Jira Cloud вместо PAT — `JIRA_USERNAME` и `JIRA_API_TOKEN`.
+### Executor image and test settings
 
-Затем подключи `jira` к нужным ролям, например к аналитику и менеджеру. Токену хватит прав сервисного аккаунта на чтение нужных проектов.
+The image contains Python, Node and Git. If a project needs other dependencies, build your own image from `darkfactory-executor:local`, install the dependencies ahead of time and set `executor_image` in the project settings.
 
- Для своего MCP доступна расширенная форма: HTTPS endpoint либо команда stdio из образа исполнителя, точные имена разрешённых инструментов и секретные заголовки или окружение. Секреты зашифрованы и не возвращаются в UI/API. Native Codex и Claude получают инструменты через локальный шлюз, который фильтрует список и запрещает вызовы вне разрешённого набора. Планировщик и ревьюер принимают только подключения, помеченные владельцем как доступные для чтения; права самого сервисного аккаунта также должны соответствовать роли. Платный API-адаптер MCP не поддерживает.
+- The owner configures the allowed test endpoints and `test_env`.
+- Names in `test_env` are only `TEST_*`, `APP_*` or `E2E_*`.
+- `allowed_hosts`, the Git remote and the PR/MR server must be fully qualified names.
+- An internal address (loopback, private network, link-local, CGNAT) is accepted only if its exact `ip:port` is listed in `allowed_hosts`.
 
-## Директор фабрики
+### Task relations
 
-Справа открыт диалог **«Директор фабрики»**. Выбери всю фабрику или отдельный проект. Через диалог можно создавать организации, проекты, пулы, роли, скиллы, подключать готовые MCP, ставить задачи и менять доступные настройки. Например: «Добавь проекту аналитика и разработчика, подключи им чтение файлов и Git».
+Task relations: `depends_on`, parent → subtask (`parent`), `related_to`, and confirmed `duplicate`. A code dependency waits for an accepted result in `preprod`; an artifact dependency can accept a specific verified commit. Cycles and cross-organization relations are forbidden. A parent waits for its mandatory child tasks and for its own integration check.
 
-Кнопка **«Новый чат»** начинает отдельную историю и контекст. Старые чаты остаются в списке. **«Отменить сообщение»** снимает запрос из очереди или останавливает активный исполнитель. Уже начатые действия могут завершиться; их журнал сохраняется. Подписка освобождается после остановки контейнера.
+### Decomposition and review
 
-Директор выполняется через **Codex CLI или Claude CLI** из подключённого пула подписок. Он использует те же API и права, что пользователь: оператор не получает права владельца, а доступ к одному проекту не открывает остальные. Платный API для директора автоматически не включается. При занятом пуле запрос остаётся в очереди. При неопределённом результате после перезапуска действия не повторяются вслепую: директор просит проверить состояние.
+- By default a task goes straight to a single developer, with no plan and no subtasks.
+- Review sends work back only for defects and unmet criteria; improvements are marked `[LATER]` and go to the backlog.
+- For a task marked "Large task", the planner can itself create up to eight subtasks with acceptance criteria and dependencies.
+- Independent children get separate working directories and can run in parallel.
+- Nested automatic decomposition is forbidden.
+- Before its own implementation, the parent collects the accepted code of its children.
+- Time, fixes, switches and money are bounded by a single budget for the whole tree; creating children does not multiply the limits. Parallel runs reserve shares of the remaining time.
+- Cancelling a parent cancels the agents it created; cancelled children are not resumed automatically.
 
-### Остановки задач
+### Dependency changes
 
-Директор же разбирает задачи, которые остановились и ждут человека: лимит циклов ревью, вопрос разработчика, закрытая сеть, истёкшее время. Он читает код и историю задачи (репозиторий подключён только на чтение) и решает сам: продолжить с указанием, вернуть на повторное ревью, разрешить адрес, отменить. Владельца он зовёт только для доступов, денег, продуктового выбора и разрушительных действий. Пока он думает, задача на доске показывает «Решает директор».
+Accepted dependency SHAs are stored in the task. A SHA change or revocation of an accepted result stops the current executor and resets the old checks and reviews. After unblocking, the task repeats input assembly, implementation and acceptance, keeping the working code and accumulated counters. Before merge, the dependency check and the Git operation run under a shared controller lock, so an input change cannot slip in between them.
 
-Кнопка **«Решения»** в чате показывает его решения по проекту. Помеченные «Ждёт тебя» нужно решить тебе: ответь директору в чате, например «по задаче … продолжай, используй …», и он сам продолжит или отменит задачу. В настройках проекта: «Директор решает остановки вместо тебя» и «Решений директора на дерево задач» (по умолчанию 6, переменная `DARKFACTORY_DIRECTOR_LIMIT`). Модель и инструкции директора задаются ролью «Директор» на экране «Роли».
+## Initializing an existing project
 
-Пароли, ключи и коды входа добавляй через формы подключений. Директор может начать вход и дать ссылку, но не получает токены или device codes. Доступ к созданной организации выдаётся отдельно и однократно через интерфейс.
+When you add a project, **"Initial indexing and Markdown documents"** is on by default. The factory queues a regular task: first it saves a map of the tracked Git files, then the executor studies the repository and creates or extends four files:
 
-Тот же диалог доступен из терминала:
+| File | Content |
+|---|---|
+| `docs/darkfactory/INDEX.md` | Project map, entry points and module purposes |
+| `docs/darkfactory/ARCHITECTURE.md` | Components, dependencies, data and system boundaries |
+| `docs/darkfactory/DEVELOPMENT.md` | Installation, running, configuration and checks |
+| `docs/darkfactory/CONTRACTS.md` | Discovered APIs, events and external integrations |
+
+The source map with SHAs is also in the task artifacts: `repository-index.md`. It lists the first 1000 tracked files and the full count. The executor must support conclusions with project files, preserve useful existing documentation and mark what is unknown. Changes outside the four documents are rejected by the worker check.
+
+The task uses the project's connections, limits, checks and independent review. If there are no connections yet, it waits for them to be set up. The documents go through the regular Git pipeline: with successful mandatory checks the changes merge into `preprod`; without configured checks they are left for manual merge. After review, all four documents appear in the registry as **drafts**, with the source task and the SHA of the verified commit. The owner accepts the versions they want explicitly; existing accepted versions are preserved.
+
+For a project connected earlier, open **"Project artifacts" → "Index project"**. The button is available to the owner and opens the existing initialization task if it was already created, without duplicates. Project creation through the API accepts `initialize` (default `true`); `false` disables the automatic start. For an existing project: `POST /api/projects/{id}/initialize`.
+
+## Project artifacts
+
+Open **"Project artifacts"** and add requirements, analytics, architecture, an API contract, a report or any other text document. An artifact has a stable key within the project, a title and a history of immutable versions. Content is stored in the DB; editing creates a new version. This is a separate project knowledge registry that complements the task working files (`plan.md`, `diff.patch`, `checks.txt`, `review.txt`, `handoff.md`) and browser evidence.
+
+- The operator adds drafts, the owner accepts a selected version or revokes acceptance, the observer reads.
+- Exactly one version of each artifact is accepted at a time.
+- Optionally specify a source task: it must have a current commit with an independent review. A version stores the task ID and SHA; a change of the source's result or of its inputs makes the document stale.
+- Regular documents are published through the form or the API; project initialization adds its own documents automatically after review.
+
+### Using artifacts as task inputs
+
+When creating a task, select accepted versions. In the card of a stopped task you can add, replace or remove an input. The task receives the full text of exactly the selected versions, their keys, numbers and source SHAs. Delegated subtasks inherit these versions.
+
+| Limit | Value |
+|---|---|
+| Characters per version | 100,000 |
+| Inputs per task | up to 10 |
+| Characters per task in total | 200,000 |
+
+Accepting a new version does not change tasks' selections automatically: consumers of the old version wait for an explicit input replacement. Revoked acceptance and a stale source also block execution. The factory resets the checks and reviews of the previous inputs, stops the active executor and re-verifies the inputs before merge. Working code and accumulated counters are preserved. The artifact card shows the history, source tasks and consumers; earlier versions remain readable.
+
+### Artifact API
+
+| Purpose | Routes |
+|---|---|
+| Artifacts | `GET/POST /api/projects/{id}/artifacts` |
+| Versions | `POST /api/project-artifacts/{id}/versions`, `GET /api/project-artifacts/{id}/versions/{version_id}` |
+| Acceptance | `POST …/versions/{version_id}/accept`, `POST /api/project-artifacts/{id}/revoke` |
+| Task inputs | `GET /api/tasks/{id}/artifact-inputs`, `PUT/DELETE /api/tasks/{id}/artifact-inputs/{artifact_id}` |
+| Task creation | accepts `artifact_version_ids` |
+
+Access is limited by organization, the user's projects and the token scope; cycles with regular dependencies are forbidden. New tables are created at startup without changing existing tasks.
+
+## Roles, delegation, skills and MCP
+
+Open **"Agents, skills and MCP"** in the left menu and select a project. The **"Add ready-made team"** button installs the project agent, analyst, developer and reviewer. The **"Roles"**, **"Skills"** and **"MCP"** tabs offer catalogs: add ready-made configurations with buttons and attach skills and tools to a role through lists. Instructions, engine and model can be changed in the role card. Profiles can also be assigned to an individual task.
+
+### Delegation
+
+While planning, the project agent creates subtasks and assigns them an `agent_profile`. For an "analysis → development" scenario, create the `analyst` and `developer` profiles: the developer subtask lists the analysis key in `depends_on`. The developer starts after the verified merge of the analysis into `preprod` and receives the accepted commit and artifacts. The analyst saves the result in the repository. Every agent with delegation permission can create further subtasks within the configured depth and total count.
+
+| Delegation default | Value |
+|---|---|
+| Depth | 2 |
+| Maximum subtasks per tree | 16 |
+| Direct subtasks per plan | 8 |
+
+Time, fixes and the money budget are shared across the tree.
+
+### Catalog
+
+The catalog contains seven skills and four MCP servers: browser, project file read/search, Git status/diff/log reading, and Jira. The first three run inside the task container and need no external server.
+
+### Jira MCP
+
+The **Jira** MCP (`mcp-atlassian`, installed in the executor image) reads Jira Server/Data Center or Cloud issues, JQL search, boards and sprints. Write tools are disabled both in the gateway and in the server itself (`--read-only`). After adding it from the catalog, open its card and fill in:
+
+- **Addresses that need access:** `jira.example.com:443`. Without this, the task's egress will not let the server reach Jira, including a private address.
+- **Secret environment:** `JIRA_URL=https://jira.example.com` and `JIRA_PERSONAL_TOKEN=<PAT>` (Jira → Profile → Personal Access Tokens). For Jira Cloud use `JIRA_USERNAME` and `JIRA_API_TOKEN` instead of a PAT.
+
+Then attach `jira` to the roles that need it, for example the analyst and the manager. The service account only needs read permission for the relevant projects.
+
+### Custom MCP
+
+An advanced form is available for your own MCP: an HTTPS endpoint or a stdio command from the executor image, exact names of allowed tools, and secret headers or environment. Secrets are encrypted and never returned in the UI/API. Native Codex and Claude receive tools through a local gateway that filters the list and forbids calls outside the allowed set. The planner and the reviewer accept only connections marked by the owner as read-safe; the service account's own permissions must also match the role. The paid API adapter does not support MCP.
+
+## Factory Director
+
+The **"Factory Director"** dialog is open on the right. Select the whole factory or a single project. Through the dialog you can create organizations, projects, pools, roles and skills, connect ready-made MCP servers, create tasks and change available settings. For example: "Add an analyst and a developer to the project, give them file and Git read access".
+
+- **"New chat"** starts a separate history and context. Old chats stay in the list.
+- **"Cancel message"** removes a request from the queue or stops the active executor. Actions already started may finish; their log is preserved. The subscription is released after the container stops.
+
+The Director runs through **Codex CLI or Claude CLI** from a connected subscription pool. It uses the same API and permissions as the user: an operator does not gain owner rights, and access to one project does not open the others. A paid API is not enabled for the Director automatically. When the pool is busy, the request stays in the queue. If the outcome is uncertain after a restart, actions are not blindly repeated: the Director asks you to check the state.
+
+> [!CAUTION]
+> Add passwords, keys and sign-in codes through the connection forms. The Director can start a sign-in and give a link, but it never receives tokens or device codes. Access to a created organization is issued separately and once through the interface.
+
+### Stalled tasks
+
+The Director also handles tasks that have stopped and wait for a human: the review-cycle limit, a developer's question, a closed network, expired time. It reads the code and the task history (the repository is connected read-only) and decides by itself: continue with guidance, return for re-review, allow an address, cancel. It calls the owner only for access, money, product choices and destructive actions. While it is thinking, the task on the board shows "Director deciding".
+
+The **"Decisions"** button in the chat shows its decisions for the project. Those marked "Waiting for you" need your decision: reply to the Director in the chat, for example "for task … continue, use …", and it continues or cancels the task by itself.
+
+Project settings: "Director resolves stops instead of you" and "Director decisions per task tree" (default 6, variable `DARKFACTORY_DIRECTOR_LIMIT`). The Director's model and instructions are set by the "Director" role on the "Roles" screen.
+
+### Director from the terminal
+
+The same dialog is available from the terminal:
 
 ```sh
 uv sync
@@ -140,53 +351,94 @@ uv run darkfactory director --token-file /path/to/api-token "Покажи про
 uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 ```
 
-Без сообщения открывается интерактивный диалог. Вместо файла можно задать `DARKFACTORY_TOKEN`; адрес сервера задаётся через `--url` или `DARKFACTORY_URL` (по умолчанию `http://127.0.0.1:8080`). Команда также доступна как `python -m darkfactory.cli director`. Ожидание по умолчанию — 600 секунд; `--timeout` меняет его. Если терминал закрыт или ожидание истекло, запрос продолжает работу. `--resume MESSAGE_ID` ждёт тот же запрос без повторной отправки; используй прежние токен и `--project`.
+Without a message, an interactive dialog opens.
 
-Для отдельного диалога CLI используй `--new-chat`, для продолжения — `--thread CHAT_ID`. `--cancel MESSAGE_ID` отменяет сообщение без повторной отправки команды.
+| Option / variable | Purpose |
+|---|---|
+| `--token-file` or `DARKFACTORY_TOKEN` | API token (file or environment) |
+| `--url` or `DARKFACTORY_URL` | Server address (default `http://127.0.0.1:8080`) |
+| `--project` | Work with a specific project |
+| `--timeout` | Wait time; default 600 seconds |
+| `--resume MESSAGE_ID` | Wait for the same request without resending; use the previous token and `--project` |
+| `--new-chat` | Start a separate CLI dialog |
+| `--thread CHAT_ID` | Continue an existing chat |
+| `--cancel MESSAGE_ID` | Cancel a message without resending the command |
 
-## Уведомления человеку
+The command is also available as `python -m darkfactory.cli director`. If the terminal is closed or the wait times out, the request keeps running.
 
-В настройках добавь канал Rocket.Chat с HTTPS webhook и получателем `@username` или `#channel` либо Telegram с bot token и chat ID. Для Rocket.Chat разреши смену канала во входящем вебхуке. Получателя можно менять без повторного ввода URL. Выбери проект или всю организацию, затем события: вопросы, остановки, ошибки, лимиты, принятие изменений и инциденты. Настройка канала сама сообщений не отправляет. Вопросы агента и остановки конвейера попадают в очередь автоматически. API `POST /api/tasks/{id}/notify` с `{"message":"..."}` позволяет отправить сообщение по настроенным каналам задачи.
+## Human notifications
 
-Доставка выполняется отдельно от задач, с пятью попытками и задержкой между повторами. Секреты не показываются повторно. После сбоя между отправкой и сохранением подтверждения возможно повторное сообщение. Ответы на вопросы вводятся в карточке задачи или прямо в чате.
+In the settings add a Rocket.Chat channel with an HTTPS webhook and a recipient `@username` or `#channel`, or Telegram with a bot token and a chat ID. For Rocket.Chat, allow channel override in the incoming webhook. The recipient can be changed without re-entering the URL. Select a project or the whole organization, then the events: questions, stops, errors, limits, accepted changes and incidents. Setting up a channel does not send any messages by itself. Agent questions and pipeline stops enter the queue automatically. The API `POST /api/tasks/{id}/notify` with `{"message":"..."}` sends a message to the task's configured channels.
 
-Команды из чата включает API-токен с ролью оператора в настройках канала: команды выполняются с его правами и областью проектов, поэтому выдай отдельный токен с нужным минимумом. Токен владельца канал не принимает. Без `allowed_senders` командами может пользоваться любой участник чата; со списком `allowed_senders` (Telegram `from.id`, Rocket.Chat `user_id`) — только перечисленные. Отправитель записывается в событие задачи.
+Delivery runs separately from tasks, with five attempts and a delay between retries. Secrets are not shown again. After a failure between sending and saving the acknowledgement, a duplicate message is possible. Answers to questions are entered in the task card or directly in the chat.
 
-- `director текст` (или `/director текст`) передаёт поручение директору. В группах Telegram с privacy mode бот видит только `/director`. Telegram отвечает на сообщение с командой, Rocket.Chat — в треде этого сообщения. Пока директор занят, новая команда получает отказ.
-- Ответ на уведомление о вопросе или остановке продолжает задачу с этим текстом, как кнопка «Продолжить» в карточке. В Telegram ответь на сообщение бота или перешли его боту в личный чат с комментарием. В Rocket.Chat ответь в треде уведомления.
-- Telegram читается long polling через `getUpdates`, поэтому публичный адрес не нужен; у бота не должно быть webhook. Каналы с одним ботом делят сообщения по chat ID.
+### Chat commands
 
-### Управление из Telegram
+Chat commands are enabled by an API token with the operator role in the channel settings: commands run with its permissions and project scope, so issue a dedicated token with the minimum needed. The channel does not accept an owner token. Without `allowed_senders`, any chat member can use commands; with an `allowed_senders` list (Telegram `from.id`, Rocket.Chat `user_id`), only the listed ones can. The sender is recorded in the task event.
 
-С токеном команд бот Telegram даёт кнопочное меню. `/start` или `меню` открывает его. Экраны обновляются в том же сообщении.
+- `director text` (or `/director text`) hands an assignment to the Director. In Telegram groups with privacy mode, the bot sees only `/director`. Telegram replies to the message with the command, Rocket.Chat replies in that message's thread. While the Director is busy, a new command is refused.
+- A reply to a question or stop notification continues the task with that text, like the "Continue" button in the card. In Telegram, reply to the bot's message or forward it to the bot in a private chat with a comment. In Rocket.Chat, reply in the notification's thread.
+- Telegram is read by long polling through `getUpdates`, so no public address is needed; the bot must not have a webhook. Channels sharing one bot split messages by chat ID.
 
-- Проекты → доска с колонками «К запуску», «В работе», «Нужно внимание», «Завершены» → список задач → карточка. В карточке — вопрос агента и кнопки по состоянию задачи.
-- «✍️ Ответить» передаёт агенту ответ и продолжает задачу. Кнопки «Ответить» и «Карточка» есть и под каждым уведомлением о задаче.
-- Порядок в очереди меняется кнопками «⏫ Выше» и «⏬ Ниже» или «➡️ Переместить» → «В начало» и «В конец»: это приоритет задачи. «Переместить» также возвращает задачу к запуску, сливает её или отменяет; отмена спрашивает подтверждение.
-- «➕ Новая задача»: первая строка ответа — название, весь текст — описание.
-- «🧠 Директор» передаёт сообщение директору. В личном чате с ботом любой обычный текст тоже идёт директору, ответ на его сообщение продолжает разговор.
-- Подписки подключаются только в веб-настройках: чат вход не начинает.
-- Для Rocket.Chat создай исходящий вебхук на событие «Сообщение отправлено» в той же комнате, что и входящий. URL: `https://<фабрика>/api/chat-commands/rocketchat/<id канала>` (показан в списке каналов), токен вебхука укажи в настройках канала. Сообщения бота не исключай: по ним фабрика узнаёт, к какой задаче относится тред. Rocket.Chat не пропускает неизвестную `/director`, поэтому пиши `director текст`.
+### Managing from Telegram
 
-После проверенного слияния в `preprod` канал получает название задачи и проекта, короткий итог разработчика, SHA и ссылку на принятый коммит. Для GitHub/GitLab ссылка ведёт на страницу коммита; для локального и обычного Git — на авторизованную карточку с diff в фабрике. Неуспешные попытки не отправляют сообщение о выполнении. Для сотрудников задай доступный им адрес фабрики через `DARKFACTORY_PUBLIC_URL` в `.env`, например `https://factory.company.ru`, затем перезапусти Compose. По умолчанию ссылки используют `http://127.0.0.1:8080`. Токены в ссылки не добавляются; при необходимости потребуется вход.
+With a command token, the Telegram bot provides a button menu. `/start` or `меню` opens it. Screens are updated in the same message.
 
-После завершения верхнеуровневой задачи уведомление также содержит ссылку **«Влить в main / отклонить»**. Это предложение слияния внутри фабрики, доступное и для локального Git. Оно фиксирует принятый коммит и показывает полный diff относительно текущей `main` (до 100 000 символов, с отметкой об обрезании). Владелец может влить его или отклонить; GET-ссылка сама ничего не меняет. В перенос входят все изменения `preprod` до указанного коммита, включая подзадачи. Отклонение сохраняет `preprod`. Автопереноса в `main` и развёртывания нет; директор не может принять это решение. Если `main` разошлась с принятым коммитом, сначала нужна интеграция и повторные проверки. Старые завершённые задачи автоматически не получают новые предложения.
+- Projects → board with the columns "Ready to run", "In progress", "Needs attention", "Done" → task list → card. The card shows the agent's question and buttons according to the task state.
+- "✍️ Reply" passes an answer to the agent and continues the task. The "Reply" and "Card" buttons are also under every task notification.
+- Queue order changes with the "⏫ Higher" and "⏬ Lower" buttons or "➡️ Move" → "To start" and "To end": this is the task's priority. "Move" also returns a task to run, merges it or cancels it; cancellation asks for confirmation.
+- "➕ New task": the first line of the reply is the title, the whole text is the description.
+- "🧠 Director" hands a message to the Director. In a private chat with the bot, any plain text also goes to the Director, and a reply to its message continues the conversation.
+- Subscriptions are connected only in the web settings: the chat does not start a sign-in.
 
-Обратное направление автоматическое: раз в час (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` выключает) фабрика вливает новые коммиты `main` в `preprod` — например, хотфиксы владельца. Если `preprod` не ушла вперёд, она просто догоняет `main`; иначе создаётся merge-коммит. При конфликте появляется задача «Влить main в preprod: конфликт» с начатым слиянием и маркерами в рабочей папке; агент разрешает конфликт, после чего задача проходит обычные ревью и проверки.
+### Setting up Rocket.Chat commands
 
-Пулы можно удалить в настройках или через `DELETE /api/pools/{id}`, в том числе через директора. Удаление доступно владельцу всей организации. Подписки, авторизация и членство в других пулах сохраняются. Если пул назначен проекту, сначала выбери другой пул для разработки и ревью. Незавершённый вход в подписку также нужно завершить или отменить перед удалением.
+Create an outgoing webhook for the "Message sent" event in the same room as the incoming one. URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (shown in the channel list); set the webhook token in the channel settings. Do not exclude the bot's messages: the factory uses them to learn which task a thread belongs to. Rocket.Chat does not pass an unknown `/director`, so write `director text`.
 
-## Лимиты и инциденты
+### Merge notifications
 
-У задач четыре приоритета: критический (`critical`), высокий (`high`), обычный (`normal`, по умолчанию) и низкий (`low`). Приоритет выбирается при создании и меняется в карточке задачи владельцем или оператором; API: `PUT /api/tasks/{id}/priority` с полем `priority`. Директор может использовать тот же API. Сначала выбираются исправления `preprod`, затем готовые задачи по приоритету и времени создания. Приоритет не отменяет зависимости, квоты и лимиты и не прерывает уже запущенную работу. Подзадачи наследуют приоритет родителя при создании. Старые задачи получают обычный приоритет.
+After a verified merge into `preprod`, the channel receives the task and project names, a short developer summary, the SHA and a link to the accepted commit. For GitHub/GitLab the link leads to the commit page; for local and generic Git it leads to an authorized card with the diff in the factory. Unsuccessful attempts do not send a completion message.
 
-По умолчанию: две активные задачи, 60 минут суммарного активного времени задачи и три цикла исправлений после первой реализации. Ожидания не расходуют активное время. Перезапуск, смена аккаунта и повтор той же поломки сохраняют счётчики. Лимит останавливает задачу до явного решения человека. Отменённые задачи не возобновляются автоматически.
+For employees, set a factory address reachable by them through `DARKFACTORY_PUBLIC_URL` in `.env`, for example `https://factory.company.ru`, then restart Compose. By default links use `http://127.0.0.1:8080`. Tokens are not added to links; sign-in may be required.
 
-После слияния и затем периодически worker повторяет проверки `preprod`. Поломка открывает приоритетное исправление, останавливает новые слияния проекта и задачи, зависящие от его сломанного результата. Остальные проекты продолжают работу. Исправление проходит обычные проверки и ревью. Повтор совпадающей диагностики возвращается к прежнему инциденту с прежними лимитами. Отдельно можно сообщить об инциденте из UI/API. Автоматического отката нет.
+### Promoting to main
 
-## Проверки реализации
+When a top-level task completes, the notification also contains a **"Merge to main / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current `main` (up to 100,000 characters, with a truncation mark). The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
 
-Текущие результаты и оставшаяся приёмка: [VALIDATION.md](VALIDATION.md).
+> [!NOTE]
+> There is no automatic transfer to `main` and no deployment; the Director cannot make this decision. If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
+
+### Syncing main back into preprod
+
+The reverse direction is automatic: once an hour (`DARKFACTORY_MAIN_SYNC_SECONDS`, `0` disables) the factory merges new `main` commits into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with `main`; otherwise a merge commit is created. On conflict, a task "Merge main into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
+
+## Limits and incidents
+
+### Priorities
+
+Tasks have four priorities: critical (`critical`), high (`high`), normal (`normal`, default) and low (`low`). Priority is chosen at creation and changed in the task card by the owner or an operator; API: `PUT /api/tasks/{id}/priority` with the `priority` field. The Director can use the same API.
+
+- `preprod` fixes are picked first, then ready tasks by priority and creation time.
+- Priority does not override dependencies, quotas and limits and does not interrupt work already running.
+- Subtasks inherit the parent's priority at creation. Old tasks get normal priority.
+
+### Defaults
+
+| Limit | Default |
+|---|---|
+| Active tasks | 2 |
+| Total active task time | 60 minutes |
+| Fix cycles after the first implementation | 3 |
+
+Waiting does not consume active time. A restart, an account switch and a repeat of the same failure preserve the counters. A limit stops the task until an explicit human decision. Cancelled tasks are not resumed automatically.
+
+### Incidents
+
+After a merge, and then periodically, the worker repeats the `preprod` checks. A breakage opens a priority fix, stops new merges of the project and the tasks that depend on its broken result. Other projects keep working. The fix goes through the regular checks and review. A repeat of the same diagnosis returns to the earlier incident with the earlier limits. You can also report an incident separately from the UI/API. There is no automatic rollback.
+
+## Implementation checks
+
+Current results and the remaining acceptance: [VALIDATION.md](VALIDATION.md).
 
 ```sh
 uv sync --extra dev
@@ -196,33 +448,72 @@ node --check darkfactory/static/app.js
 docker compose exec -T worker python - < scripts/docker_smoke.py
 ```
 
-Docker smoke создаёт отдельную организацию, два настоящих локальных bare Git-репозитория и 13 задач (10 исправлений, 3 функции). Проходят настоящие PostgreSQL, очередь, контейнеры, Git, проверки, независимые сессии ревью и слияния. Вместо платной модели используется отдельный детерминированный HTTPS fixture. Это проверка инфраструктуры, а не доказательство качества реальных моделей или работы пользовательских подписок. Продуктовый API не содержит тестового исполнителя.
+The Docker smoke test creates a separate organization, two real local bare Git repositories and 13 tasks (10 fixes, 3 features). Real PostgreSQL, the queue, containers, Git, checks, independent review sessions and merges all take part. Instead of a paid model, a separate deterministic HTTPS fixture is used. This verifies infrastructure; it is not proof of real model quality or of user subscriptions working. The product API contains no test executor.
 
-Для проверки SSH собери отдельный тестовый OpenSSH-сервер и включи режим `SMOKE_SSH`:
+To test SSH, build a separate test OpenSSH server and enable the `SMOKE_SSH` mode:
 
 ```sh
 docker build -t darkfactory-smoke-ssh:local - < scripts/ssh-git.Dockerfile
 docker compose exec -T -e SMOKE_SSH=1 worker python - < scripts/docker_smoke.py
 ```
 
-В этом режиме второй проект проходит весь конвейер через SSH. Дополнительно проверяется отказ при неверном ключе сервера и неверном ключе клиента. Тестовый сервер не публикует порты хоста и удаляется при завершении, включая ошибку. После успешного прогона периодические проверки его проекта отключаются; репозитории и результаты остаются в томах для просмотра.
+In this mode the second project goes through the whole pipeline over SSH. Refusal on a wrong server key and on a wrong client key is also verified. The test server publishes no host ports and is removed on completion, including on error. After a successful run, periodic checks of its project are disabled; repositories and results remain in the volumes for inspection.
 
-## Проверка интерфейсов в браузере
+## Browser UI testing
 
-В образе исполнителя установлены Chromium, Playwright Test и Playwright MCP. Добавь разработчику готовый скилл **«Проверка интерфейса в браузере»** (`browser-testing`) и MCP `project-browser` из каталога. Браузер работает внутри изолированного контейнера задачи; локальное приложение запускается там же. Для проектов с UI задай обязательную команду Playwright в проверках проекта. Скилл и MCP помогают агенту исследовать интерфейс; именно обязательная проверка блокирует слияние при ошибке.
+The executor image includes Chromium, Playwright Test and Playwright MCP. Add the ready-made **"Browser UI testing"** skill (`browser-testing`) and the `project-browser` MCP from the catalog to the developer. The browser runs inside the isolated task container; the local application starts there too. For projects with a UI, set a mandatory Playwright command in the project checks. The skill and MCP help the agent explore the interface; it is the mandatory check that blocks the merge on failure.
 
-Сохраняй скриншоты, JSON-отчёты и trace в `/run/evidence` (переменная `DARKFACTORY_EVIDENCE_DIR`). В карточке задачи кнопка **«Браузерные проверки»** открывает список артефактов и предпросмотр изображений. Остальные файлы скачиваются; HTML-отчёты не исполняются внутри фабрики. История разделена по запускам и ролям. Эти файлы дополняют обязательные проверки и ревью; скриншот сам по себе не подтверждает корректность.
+Save screenshots, JSON reports and traces to `/run/evidence` (variable `DARKFACTORY_EVIDENCE_DIR`). In the task card, the **"Browser checks"** button opens the artifact list and an image preview. Other files are downloaded; HTML reports are not executed inside the factory. History is split by runs and roles. These files complement the mandatory checks and review; a screenshot alone does not prove correctness.
 
-Реальный браузерный пилот создаёт отдельный локальный Git-проект с ошибками в форме и мобильной вёрстке. Проверки должны сначала упасть, затем Codex исправляет страницу, независимая сессия проверяет результат, а принятый preprod повторно проходит восемь браузерных сценариев. Скрипт сохраняет checkpoint и продолжает ту же задачу при повторном запуске:
+### Live browser pilot
+
+The real browser pilot creates a separate local Git project with bugs in a form and in mobile layout. The checks must fail first, then Codex fixes the page, an independent session verifies the result, and the accepted preprod passes eight browser scenarios again. The script saves a checkpoint and continues the same task when run again:
 
 ```sh
-docker compose exec -T -e CODEX_CONNECTION_ID=<id-подключения> worker python - < scripts/live_browser_smoke.py
+docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
 
-## API и данные
+## API and data
 
-Спецификация доступна в [Swagger UI](http://localhost:8080/docs). Все `/api/*` запросы требуют `Authorization: Bearer <token>`. Главные ресурсы: `/api/projects`, `/api/projects/{id}/tasks`, `/api/tasks/{id}`, `/api/pools`, `/api/connections`, `/api/members`, `/api/tokens`, `/api/organizations`. Создание задачи поддерживает `idempotency_key`. Артефакты и история доступны в карточке задачи.
+The specification is available in [Swagger UI](http://localhost:8080/docs). All `/api/*` requests require `Authorization: Bearer <token>`.
 
-Состояние хранится в именованных томах PostgreSQL, `data` и `repos`. В `data` находятся зашифрованные подключения, ключ шифрования, Git-копии и артефакты. Резервируй PostgreSQL и оба файловых тома согласованно; потеря ключа делает credentials невосстановимыми. Bootstrap-токен показывается командой выше; токены участников выдаются один раз, в БД хранятся только хеши.
+| Main resources |
+|---|
+| `/api/projects` |
+| `/api/projects/{id}/tasks` |
+| `/api/tasks/{id}` |
+| `/api/pools` |
+| `/api/connections` |
+| `/api/members` |
+| `/api/tokens` |
+| `/api/organizations` |
 
-Обновление: `docker compose up -d --build`. Чтобы задачи не ждали, пока старый worker доделает текущие шаги, обновляй worker через `scripts/deploy-worker.sh`: новый worker сразу берёт работу, старый доделывает начатое и останавливается. Текущие миграции добавляют недостающие столбцы и сохраняют существующие данные. Для отката верни предыдущий код/образы и перезапусти сервисы: добавленные столбцы можно оставить. Не удаляй тома при обычном обновлении.
+Task creation supports `idempotency_key`. Artifacts and history are available in the task card.
+
+### Storage and backup
+
+State is stored in the named volumes PostgreSQL, `data` and `repos`. `data` holds the encrypted connections, the encryption key, Git copies and artifacts.
+
+> [!WARNING]
+> Back up PostgreSQL and both file volumes consistently; losing the key makes credentials unrecoverable. The bootstrap token is shown by the command above; member tokens are issued once, and only hashes are stored in the DB.
+
+### Updating
+
+Update with `docker compose up -d --build`. So that tasks do not wait for the old worker to finish its current steps, update the worker through `scripts/deploy-worker.sh`: the new worker takes work immediately, the old one finishes what it started and stops. The current migrations add missing columns and preserve existing data. To roll back, restore the previous code/images and restart the services; the added columns can stay. Do not delete volumes during a regular update.
+
+## Interface languages
+
+The web UI ships in 10 languages: English, 中文, हिन्दी, Español, العربية, Français, বাংলা, Português, Русский, 日本語. It picks the browser language and falls back to English. The picker is on the login card and in the sidebar footer. The choice is stored in the `localStorage` key `df-lang`.
+
+> [!NOTE]
+> Messages generated by the server (task events, reasons) remain in Russian.
+
+**For contributors**
+
+- UI strings are Russian source keys wrapped in `tr()` in `darkfactory/static/*.js`.
+- Translations live in `darkfactory/static/locales/<code>.json`.
+- `python scripts/i18n_check.py` reports unwrapped strings, missing keys and placeholder mismatches.
+
+## License
+
+Darkfactory is released under the [MIT License](LICENSE).

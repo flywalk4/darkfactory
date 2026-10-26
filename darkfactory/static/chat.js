@@ -19,8 +19,8 @@
   function attach(files) {
     for (const file of files) {
       if (!imageTypes.includes(file.type)) continue;
-      if (state.images.length >= 4) { ui.error.textContent = 'Не больше 4 картинок в сообщении'; ui.error.hidden = false; break; }
-      if (file.size > 5 * 1024 * 1024) { ui.error.textContent = 'Картинка больше 5 МБ'; ui.error.hidden = false; continue; }
+      if (state.images.length >= 4) { ui.error.textContent = tr('Не больше 4 картинок в сообщении'); ui.error.hidden = false; break; }
+      if (file.size > 5 * 1024 * 1024) { ui.error.textContent = tr('Картинка больше 5 МБ'); ui.error.hidden = false; continue; }
       const reader = new FileReader();
       reader.onload = () => {
         if (state.images.length >= 4) return;
@@ -36,10 +36,10 @@
       const item = element('div', 'df-chat-attachment');
       const img = element('img');
       img.src = image.preview;
-      img.alt = 'Картинка ' + (index + 1);
+      img.alt = tr('Картинка {n}', {n: index + 1});
       const remove = element('button', 'df-chat-attachment-remove', '×');
       remove.type = 'button';
-      remove.title = 'Убрать картинку';
+      remove.title = tr('Убрать картинку');
       remove.onclick = () => { state.images.splice(index, 1); renderAttachments(); };
       item.append(img, remove);
       return item;
@@ -48,12 +48,12 @@
   }
   const ui = {};
   const presets = [
-    ['Проекты', 'Помоги создать и настроить проект'],
-    ['Команда', 'Настрой команду проекта'],
-    ['Пулы', 'Покажи пулы подписок и помоги настроить их'],
-    ['Задачи', 'Помоги поставить задачу и проверить её статус'],
-    ['MCP', 'Какие MCP доступны?'],
-    ['Скиллы', 'Создай скилл'],
+    [tr('Проекты'), tr('Помоги создать и настроить проект')],
+    [tr('Команда'), tr('Настрой команду проекта')],
+    [tr('Пулы'), tr('Покажи пулы подписок и помоги настроить их')],
+    [tr('Задачи'), tr('Помоги поставить задачу и проверить её статус')],
+    ['MCP', tr('Какие MCP доступны?')],
+    [tr('Скиллы'), tr('Создай скилл')],
   ];
   const element = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -75,11 +75,11 @@
     ui.newChat.disabled = readonly || state.sending || state.changing;
     ui.stop.hidden = !state.busy;
     ui.stop.disabled = readonly || state.changing || !state.active || state.activeStatus === 'cancelling';
-    ui.stop.textContent = state.activeStatus === 'cancelling' ? 'Останавливаем…' : 'Отменить сообщение';
-    ui.send.textContent = state.sending ? 'Отправляем…' : 'Отправить';
-    ui.status.textContent = state.sending ? 'Отправляем сообщение…' : state.activeStatus === 'cancelling'
-      ? 'Останавливаем исполнителя. Уже начатые действия могут завершиться.' : state.busy ? 'Директор работает…'
-      : readonly ? 'Чтение диалога. Отправка доступна владельцу и оператору.' : '';
+    ui.stop.textContent = state.activeStatus === 'cancelling' ? tr('Останавливаем…') : tr('Отменить сообщение');
+    ui.send.textContent = state.sending ? tr('Отправляем…') : tr('Отправить');
+    ui.status.textContent = state.sending ? tr('Отправляем сообщение…') : state.activeStatus === 'cancelling'
+      ? tr('Останавливаем исполнителя. Уже начатые действия могут завершиться.') : state.busy ? tr('Директор работает…')
+      : readonly ? tr('Чтение диалога. Отправка доступна владельцу и оператору.') : '';
     ui.status.hidden = !ui.status.textContent;
     ui.panel.setAttribute('aria-busy', String(state.busy || state.sending));
     ui.toggle.classList.toggle('df-chat-working', state.busy);
@@ -103,7 +103,7 @@
   function syncContext() {
     const available = typeof projects !== 'undefined' && Array.isArray(projects) ? projects : [];
     const current = typeof projectId !== 'undefined' ? projectId : '';
-    const options = [['', 'Вся фабрика'], ...available.map(project => [project.id, project.name])];
+    const options = [['', tr('Вся фабрика')], ...available.map(project => [project.id, project.name])];
     const signature = JSON.stringify(options);
     if (ui.context.dataset.options !== signature) {
       let saved = '';
@@ -119,7 +119,7 @@
     }
     // Factory scope remains stable when the board changes. An explicitly
     // selected project also remains stable until the user changes context.
-    ui.context.title = current ? 'Вся фабрика или отдельный проект' : 'Контекст диалога';
+    ui.context.title = current ? tr('Вся фабрика или отдельный проект') : tr('Контекст диалога');
     const organization = currentUser.organization?.id || currentUser.id || '';
     const context = selectedContext();
     if (state.context !== context || state.organization !== organization) {
@@ -132,7 +132,7 @@
       state.activeStatus = null;
       state.thread = '';
       try { state.thread = localStorage.getItem(threadKey()) || ''; } catch {}
-      ui.threads.replaceChildren(new Option('Общий чат', ''));
+      ui.threads.replaceChildren(new Option(tr('Общий чат'), ''));
       ui.threads.dataset.options = '';
       ui.messages.replaceChildren();
       ui.empty.hidden = false;
@@ -155,14 +155,14 @@
   // The Director's decisions on stopped tasks; the open ones are answered right here in the chat.
   async function showJournal() {
     const project = selectedContext();
-    if (!project) { toast('Выбери проект в контексте диалога'); return; }
+    if (!project) { toast(tr('Выбери проект в контексте диалога')); return; }
     const rows = await api(`/projects/${project}/director-journal`);
-    const kinds = {supervisor: 'Решил', supervisor_escalated: 'Ждёт тебя', folded: 'Передал цель'};
-    const items = rows.length ? rows.map(row => `<div class="event ${row.open ? 'warn' : ''}"><small>${new Date(row.at * 1000).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})} · ${esc(row.open ? 'Ждёт тебя' : kinds[row.kind] || row.kind)} · <a href="?task=${esc(row.task_id)}" data-journal-task="${esc(row.task_id)}">${esc(row.task_title)}</a></small><p>${esc(row.message.length > 600 ? row.message.slice(0, 600) + '…' : row.message)}</p></div>`).join('')
-      : '<p class="muted small">Директор ещё не разбирал остановки в этом проекте.</p>';
-    modal('Решения директора', `<p class="small">Чтобы ответить на «Ждёт тебя», напиши директору в чат, например: «по задаче … продолжай, используй …».</p><div class="timeline">${items}</div>`, async () => {});
+    const kinds = {supervisor: tr('Решил'), supervisor_escalated: tr('Ждёт тебя'), folded: tr('Передал цель')};
+    const items = rows.length ? rows.map(row => `<div class="event ${row.open ? 'warn' : ''}"><small>${new Date(row.at * 1000).toLocaleString(LOCALE, {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})} · ${esc(row.open ? tr('Ждёт тебя') : kinds[row.kind] || row.kind)} · <a href="?task=${esc(row.task_id)}" data-journal-task="${esc(row.task_id)}">${esc(row.task_title)}</a></small><p>${esc(row.message.length > 600 ? row.message.slice(0, 600) + '…' : row.message)}</p></div>`).join('')
+      : '<p class="muted small">' + tr('Директор ещё не разбирал остановки в этом проекте.') + '</p>';
+    modal(tr('Решения директора'), `<p class="small">${tr('Чтобы ответить на «Ждёт тебя», напиши директору в чат, например: «по задаче … продолжай, используй …».')}</p><div class="timeline">${items}</div>`, async () => {});
     $('#submit-modal').hidden = true;
-    $('#cancel-modal').textContent = 'Закрыть';
+    $('#cancel-modal').textContent = tr('Закрыть');
     document.querySelectorAll('[data-journal-task]').forEach(link => link.onclick = event => { event.preventDefault(); $('#modal').close(); showDetail(link.dataset.journalTask).catch(error => toast(error.message)); });
   }
 
@@ -181,7 +181,7 @@
       await refresh();
     } catch (error) {
       if (epoch !== state.epoch || !authenticated()) return;
-      ui.error.textContent = error.message || 'Не удалось создать чат';
+      ui.error.textContent = error.message || tr('Не удалось создать чат');
       ui.error.hidden = false;
     } finally {
       state.changing = false;
@@ -202,7 +202,7 @@
       await refresh();
     } catch (error) {
       if (epoch !== state.epoch || !authenticated()) return;
-      ui.error.textContent = error.message || 'Не удалось отменить сообщение';
+      ui.error.textContent = error.message || tr('Не удалось отменить сообщение');
       ui.error.hidden = false;
     } finally {
       state.changing = false;
@@ -218,7 +218,7 @@
     const previousTop = ui.history.scrollTop;
     ui.messages.replaceChildren(...rows.map(message => {
       const item = element('article', `df-chat-message df-chat-${message.role}`);
-      const heading = element('div', 'df-chat-message-author', message.role === 'user' ? 'Ты' : 'Директор фабрики');
+      const heading = element('div', 'df-chat-message-author', message.role === 'user' ? tr('Ты') : tr('Директор фабрики'));
       item.append(heading);
       if (message.content) item.append(element('div', 'df-chat-message-content', String(message.content)));
       if (Array.isArray(message.images) && message.images.length) {
@@ -228,27 +228,27 @@
           link.target = '_blank';
           link.rel = 'noopener';
           const img = element('img');
-          img.alt = 'Приложенная картинка';
-          imageSource(String(path)).then(url => { img.src = url; link.href = url; }).catch(() => { img.alt = 'Картинка недоступна'; });
+          img.alt = tr('Приложенная картинка');
+          imageSource(String(path)).then(url => { img.src = url; link.href = url; }).catch(() => { img.alt = tr('Картинка недоступна'); });
           link.append(img);
           gallery.append(link);
         });
         item.append(gallery);
       }
-      const labels = {queued:'В очереди', waiting_pool:'Ждёт подписку', running:'В работе', recovering:'Восстановление', cancelling:'Останавливается', failed:'Не удалось выполнить запрос', cancelled:'Отменено'};
+      const labels = {queued:tr('В очереди'), waiting_pool:tr('Ждёт подписку'), running:tr('В работе'), recovering:tr('Восстановление'), cancelling:tr('Останавливается'), failed:tr('Не удалось выполнить запрос'), cancelled:tr('Отменено')};
       if (labels[message.status]) item.append(element('small', 'df-chat-message-state', labels[message.status]));
       if (message.role === 'assistant' && message.organization_access_available === true && message.id) {
-        const openOrganization = element('button', 'df-chat-organization', 'Открыть организацию');
+        const openOrganization = element('button', 'df-chat-organization', tr('Открыть организацию'));
         openOrganization.type = 'button';
         openOrganization.onclick = async () => {
           openOrganization.disabled = true;
           try {
             const result = await api('/config-chat/messages/' + encodeURIComponent(message.id) + '/organization-access', 'POST');
-            if (typeof result.token !== 'string' || !result.token) throw new Error('Не удалось открыть организацию');
+            if (typeof result.token !== 'string' || !result.token) throw new Error(tr('Не удалось открыть организацию'));
             sessionStorage.setItem('df-token', result.token);
             location.reload();
           } catch (error) {
-            ui.error.textContent = error.message || 'Не удалось открыть организацию';
+            ui.error.textContent = error.message || tr('Не удалось открыть организацию');
             ui.error.hidden = false;
             openOrganization.disabled = false;
           }
@@ -276,7 +276,7 @@
       const threads = await api('/config-chat/threads?' + params);
       if (epoch !== state.epoch || !authenticated()) return;
       if (thread && !threads.some(item => item.id === thread)) { selectThread(''); return; }
-      const choices = [new Option('Общий чат', ''), ...threads.map(item => new Option(item.title, item.id))];
+      const choices = [new Option(tr('Общий чат'), ''), ...threads.map(item => new Option(item.title, item.id))];
       const optionsSignature = JSON.stringify(threads);
       if (ui.threads.dataset.options !== optionsSignature) {
         ui.threads.replaceChildren(...choices);
@@ -295,12 +295,12 @@
       state.active = result.active_message_id;
       state.activeStatus = result.active_status;
       if (state.busy && (result.active_thread_id !== (thread || null) || result.active_project_id !== (context || null))) {
-        ui.stop.title = 'Отменить сообщение, которое выполняется в другом чате';
-      } else ui.stop.title = 'Уже начатые действия могут завершиться. Журнал сохранится.';
+        ui.stop.title = tr('Отменить сообщение, которое выполняется в другом чате');
+      } else ui.stop.title = tr('Уже начатые действия могут завершиться. Журнал сохранится.');
       ui.error.hidden = true;
     } catch (error) {
       if (epoch !== state.epoch || !authenticated()) return;
-      ui.error.textContent = error.message || 'Не удалось загрузить диалог';
+      ui.error.textContent = error.message || tr('Не удалось загрузить диалог');
       ui.error.hidden = false;
     } finally {
       state.polling = false;
@@ -335,7 +335,7 @@
       await refresh();
     } catch (error) {
       if (epoch !== state.epoch || !authenticated()) return;
-      ui.error.textContent = error.message || 'Не удалось отправить сообщение';
+      ui.error.textContent = error.message || tr('Не удалось отправить сообщение');
       ui.error.hidden = false;
     } finally {
       state.sending = false;
@@ -355,47 +355,47 @@
     const header = element('div', 'df-chat-header');
     const heading = element('div', 'df-chat-heading');
     heading.append(element('span', 'df-chat-symbol', '✦'));
-    const title = element('h2', '', 'Директор фабрики');
+    const title = element('h2', '', tr('Директор фабрики'));
     title.id = 'factory-chat-title';
     heading.append(title);
     const close = element('button', 'df-chat-close', '✕');
     close.type = 'button';
-    close.title = 'Свернуть чат';
-    close.setAttribute('aria-label', 'Свернуть чат');
+    close.title = tr('Свернуть чат');
+    close.setAttribute('aria-label', tr('Свернуть чат'));
     close.onclick = () => setOpen(false, true);
     header.append(heading, close);
 
-    const contextLabel = element('label', 'df-chat-context', 'Контекст');
+    const contextLabel = element('label', 'df-chat-context', tr('Контекст'));
     ui.context = element('select');
-    ui.context.setAttribute('aria-label', 'Контекст диалога');
+    ui.context.setAttribute('aria-label', tr('Контекст диалога'));
     ui.context.onchange = () => { try { localStorage.setItem('df-director-context', selectedContext()); } catch {} syncContext(); controls(); refresh(); };
     contextLabel.append(ui.context);
     const conversations = element('div', 'df-chat-conversations');
     ui.threads = element('select');
-    ui.threads.setAttribute('aria-label', 'Чаты с директором');
+    ui.threads.setAttribute('aria-label', tr('Чаты с директором'));
     ui.threads.onchange = () => { selectThread(ui.threads.value); controls(); refresh(); };
-    ui.newChat = element('button', 'df-chat-new', '+ Новый чат');
+    ui.newChat = element('button', 'df-chat-new', '+ ' + tr('Новый чат'));
     ui.newChat.type = 'button';
     ui.newChat.onclick = newChat;
-    ui.journal = element('button', 'df-chat-new', 'Решения');
+    ui.journal = element('button', 'df-chat-new', tr('Решения'));
     ui.journal.type = 'button';
-    ui.journal.title = 'Как директор разобрал остановленные задачи';
+    ui.journal.title = tr('Как директор разобрал остановленные задачи');
     ui.journal.onclick = () => showJournal().catch(error => toast(error.message));
     conversations.append(ui.threads, ui.newChat, ui.journal);
     ui.history = element('div', 'df-chat-history');
     ui.empty = element('div', 'df-chat-empty');
-    ui.empty.append(element('span', 'df-chat-empty-symbol', '✦'), element('h3', '', 'Что нужно фабрике?'),
-      element('p', '', 'Обсуди проекты, команду, подписки и задачи. Директор учтёт твои права и контекст.'));
+    ui.empty.append(element('span', 'df-chat-empty-symbol', '✦'), element('h3', '', tr('Что нужно фабрике?')),
+      element('p', '', tr('Обсуди проекты, команду, подписки и задачи. Директор учтёт твои права и контекст.')));
     ui.messages = element('div', 'df-chat-messages');
     ui.messages.setAttribute('role', 'log');
     ui.messages.setAttribute('aria-live', 'polite');
     ui.messages.setAttribute('aria-relevant', 'additions text');
-    ui.messages.setAttribute('aria-label', 'История диалога');
+    ui.messages.setAttribute('aria-label', tr('История диалога'));
     ui.history.append(ui.empty, ui.messages);
 
     const composer = element('div', 'df-chat-composer');
     ui.presets = element('div', 'df-chat-presets');
-    ui.presets.setAttribute('aria-label', 'Начать разговор');
+    ui.presets.setAttribute('aria-label', tr('Начать разговор'));
     presets.forEach(([label, prompt]) => {
       const button = element('button', 'df-chat-preset', label);
       button.type = 'button';
@@ -406,7 +406,7 @@
     ui.status = element('div', 'df-chat-status');
     ui.status.setAttribute('role', 'status');
     ui.status.hidden = true;
-    ui.stop = element('button', 'df-chat-stop', 'Отменить сообщение');
+    ui.stop = element('button', 'df-chat-stop', tr('Отменить сообщение'));
     ui.stop.type = 'button';
     ui.stop.hidden = true;
     ui.stop.onclick = cancelMessage;
@@ -417,8 +417,8 @@
     ui.input = element('textarea', 'df-chat-input');
     ui.input.rows = 3;
     ui.input.maxLength = 12000;
-    ui.input.placeholder = 'Напиши, что нужно сделать…';
-    ui.input.setAttribute('aria-label', 'Сообщение директору фабрики');
+    ui.input.placeholder = tr('Напиши, что нужно сделать…');
+    ui.input.setAttribute('aria-label', tr('Сообщение директору фабрики'));
     ui.input.addEventListener('input', () => {
       ui.input.style.height = 'auto';
       ui.input.style.height = Math.min(160, ui.input.scrollHeight) + 'px';
@@ -443,27 +443,27 @@
     ui.file.onchange = () => { attach(ui.file.files); ui.file.value = ''; };
     ui.attach = element('button', 'df-chat-attach', '📎');
     ui.attach.type = 'button';
-    ui.attach.title = 'Приложить картинку (или вставь Ctrl/Cmd+V)';
-    ui.attach.setAttribute('aria-label', 'Приложить картинку');
+    ui.attach.title = tr('Приложить картинку (или вставь Ctrl/Cmd+V)');
+    ui.attach.setAttribute('aria-label', tr('Приложить картинку'));
     ui.attach.onclick = () => ui.file.click();
     const actions = element('div', 'df-chat-form-actions');
-    actions.append(ui.attach, ui.file, element('small', '', 'Enter — отправить · Shift + Enter — строка'));
-    ui.send = element('button', 'df-chat-send', 'Отправить');
+    actions.append(ui.attach, ui.file, element('small', '', tr('Enter — отправить · Shift + Enter — строка')));
+    ui.send = element('button', 'df-chat-send', tr('Отправить'));
     ui.send.type = 'submit';
     actions.append(ui.send);
     form.append(ui.attachments, ui.input, actions);
     form.onsubmit = send;
     composer.append(ui.presets, ui.status, ui.stop, ui.error, form,
-      element('p', 'df-chat-secret-note', 'Пароли и токены добавляй через подключения.'));
+      element('p', 'df-chat-secret-note', tr('Пароли и токены добавляй через подключения.')));
     ui.panel.append(header, contextLabel, conversations, ui.history, composer);
-    ui.toggle = element('button', 'df-chat-toggle', '✦ Директор фабрики');
+    ui.toggle = element('button', 'df-chat-toggle', '✦ ' + tr('Директор фабрики'));
     ui.toggle.type = 'button';
     ui.toggle.setAttribute('aria-controls', 'factory-chat');
     ui.toggle.onclick = () => setOpen(true, true);
     ui.backdrop = element('button', 'df-chat-backdrop');
     ui.backdrop.type = 'button';
     ui.backdrop.tabIndex = -1;
-    ui.backdrop.setAttribute('aria-label', 'Закрыть чат директора');
+    ui.backdrop.setAttribute('aria-label', tr('Закрыть чат директора'));
     ui.backdrop.onclick = () => setOpen(false, true);
     shell.append(ui.backdrop, ui.panel, ui.toggle);
     syncContext();
