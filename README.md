@@ -376,7 +376,7 @@ Delivery runs separately from tasks, with five attempts and a delay between retr
 
 Chat commands are enabled by an API token with the operator role in the channel settings: commands run with its permissions and project scope, so issue a dedicated token with the minimum needed. The channel does not accept an owner token. Without `allowed_senders`, any chat member can use commands; with an `allowed_senders` list (Telegram `from.id`, Rocket.Chat `user_id`), only the listed ones can. The sender is recorded in the task event.
 
-- `director text` (or `/director text`) hands an assignment to the Director. In Telegram groups with privacy mode, the bot sees only `/director`. Telegram replies to the message with the command, Rocket.Chat replies in that message's thread. While the Director is busy, a new command is refused.
+- `!director text` (in Telegram `/director text`) hands an assignment to the Director, for example `!director show tasks`. In Telegram groups with privacy mode, the bot sees only `/director`. Telegram replies to the message with the command, Rocket.Chat replies in that message's thread. While the Director is busy, a new command is refused.
 - A reply to a question or stop notification continues the task with that text, like the "Continue" button in the card. In Telegram, reply to the bot's message or forward it to the bot in a private chat with a comment. In Rocket.Chat, reply in the notification's thread.
 - Telegram is read by long polling through `getUpdates`, so no public address is needed; the bot must not have a webhook. Channels sharing one bot split messages by chat ID.
 
@@ -393,7 +393,15 @@ With a command token, the Telegram bot provides a button menu. `/start` or `ме
 
 ### Setting up Rocket.Chat commands
 
-Create an outgoing webhook for the "Message sent" event in the same room as the incoming one. URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (shown in the channel list); set the webhook token in the channel settings. Do not exclude the bot's messages: the factory uses them to learn which task a thread belongs to. Rocket.Chat does not pass an unknown `/director`, so write `director text`.
+Create an outgoing webhook for the "Message sent" event in the same room as the incoming one. URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (shown in the channel list); set the webhook token in the channel settings. Leave the trigger words empty and do not exclude the bot's messages: the factory uses them to learn which task a thread belongs to. Rocket.Chat does not pass unknown slash commands, so commands there start with `!`:
+
+- `!director text`: an assignment to the Director.
+- `!projects`: projects and the number of tasks in each board column.
+- `!waiting`: tasks waiting for an answer or a merge.
+- `!task <id>`: the task card.
+- `!help`: the command list.
+
+In a task notification's thread, plain text is the answer to the agent, and `!task`, `!resume`, `!merge` and `!cancel` act on that task. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar.
 
 ### Merge notifications
 

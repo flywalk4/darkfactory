@@ -177,7 +177,7 @@ def test_offline_delivery_payload_and_no_open_db_transaction(task, provider):
             assert "parse_mode" not in payload
             return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
         assert str(request.url) == WEBHOOK
-        assert set(payload) == {"text"}
+        assert set(payload) == {"text", "alias"}
         return httpx.Response(200, json={"success": True})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -617,3 +617,35 @@ def test_jira_behind_a_down_gateway_waits_without_using_attempts(task):
     with httpx.Client(transport=httpx.MockTransport(lambda request: rejected)) as client:
         assert dispatch_notifications(client=client) == 1
     assert delivery().state == "failed"
+
+
+def test_rocket_notifications_are_markdown_with_logo(task, monkeypatch):
+    from darkfactory.notifications import rocketchat_text
+
+    monkeypatch.setenv("DARKFACTORY_PUBLIC_URL", "https://factory.example")
+    channel(task, provider="rocketchat", recipient="#ops")
+    enqueue(task)
+    sent = []
+
+    def receive(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"success": True})
+
+    with httpx.Client(transport=httpx.MockTransport(receive)) as http:
+        assert dispatch_notifications(client=http) == 1
+    assert sent[0]["alias"] == "Darkfactory"
+    assert sent[0]["avatar"] == "https://factory.example/static/logo.png"
+
+    task_id = "a" * 32
+    body = f"Darkfactory · Fix login\nTask {task_id} · needs_human\nКакую базу брать?"
+    text = rocketchat_text(body, commands=True)
+    assert text.startswith("🔔 *Fix login*")
+    assert f"`Task {task_id}` · 🙋 нужно твоё решение" in text
+    assert "Ответь в треде" in text and "`!help`" in text
+    assert "Ответь в треде" not in rocketchat_text(body)
+    done = rocketchat_text(
+        "Darkfactory · Выполнено: Fix\nПроект: Demo\nГотово\nЗадача: https://f.example/?task=" + task_id
+    )
+    assert done.startswith("✅ *Выполнено:* Fix")
+    assert "*Проект:* Demo" in done
+    assert f"[📋 Открыть карточку](https://f.example/?task={task_id})" in done

@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import re
+from types import SimpleNamespace
 
 import httpx
 from fastapi import HTTPException
@@ -19,9 +20,39 @@ from . import service
 from .db import Session, Task, decrypt, encrypt, event, transaction
 from .director import ACTIVE, Dialogue, call
 from .notifications import NotificationChannel, NotificationDelivery, dispatch_notifications
+from .task_links import task_url
 
-# Rocket.Chat rejects unknown slash commands, so a plain "director" prefix works too.
-COMMAND = re.compile(r"^/?director(?:@\w+)?[:,]?(?:\s+(.*))?$", re.S | re.I)
+# Rocket.Chat rejects unknown slash commands, so chat commands there start with "!";
+# a plain "director" prefix still works for channels set up before.
+COMMAND = re.compile(r"^[/!]?director(?:@\w+)?[:,]?(?:\s+(.*))?$", re.S | re.I)
+BANG = re.compile(r"^!([\wа-яё]+)(?:\s+(.*))?$", re.S | re.I)
+ALIASES = {
+    "help": "help",
+    "помощь": "help",
+    "команды": "help",
+    "waiting": "waiting",
+    "ждут": "waiting",
+    "projects": "projects",
+    "проекты": "projects",
+    "task": "task",
+    "задача": "task",
+    "resume": "resume",
+    "продолжить": "resume",
+    "cancel": "cancel",
+    "отменить": "cancel",
+    "merge": "merge",
+    "слить": "merge",
+}
+HELP = """🏭 *Darkfactory — команды*
+`!director текст` — поручение директору, например `!director покажи задачи`
+`!projects` — проекты и сколько задач в каждой колонке
+`!waiting` — задачи, которые ждут ответа или слияния
+`!task <id>` — карточка задачи
+`!help` — эта подсказка
+
+💬 *В треде уведомления о задаче*
+Обычный текст — ответ агенту, задача продолжится
+`!task` — карточка, `!resume` — продолжить, `!merge` — слить, `!cancel` — отменить"""
 TASK_ID = re.compile(r"(?:\bTask |[?&]task=)([0-9a-f]{32})\b")
 FINISHED = ("succeeded", "failed", "cancelled")
 
@@ -206,9 +237,8 @@ def handle_rocketchat(channel_id, payload):
         return True
     thread = thread if isinstance(thread, str) else None
     reply_to = {"room_id": room, "tmid": thread or message_id}
-    if command := COMMAND.match(text.strip()):
-        submit_command(channel_id, command.group(1), message_id, reply_to, sender=sender)
-    elif thread:
+    task_id = None
+    if thread:
         with Session() as db:
             task_id = db.scalar(
                 select(NotificationDelivery.task_id).where(
@@ -217,9 +247,122 @@ def handle_rocketchat(channel_id, payload):
                     NotificationDelivery.task_id.is_not(None),
                 )
             )
-        if task_id:
-            answer_task(channel_id, task_id, text, message_id, reply_to, sender=sender)
+    if command := COMMAND.match(text.strip()):
+        submit_command(channel_id, command.group(1), message_id, reply_to, sender=sender)
+    elif bang := BANG.match(text.strip()):
+        run_bang(
+            channel_id,
+            bang.group(1).lower(),
+            (bang.group(2) or "").strip(),
+            message_id,
+            reply_to,
+            task_id,
+            sender,
+        )
+    elif task_id:
+        answer_task(channel_id, task_id, text, message_id, reply_to, sender=sender)
     return True
+
+
+def _detail(code, value):
+    found = value.get("detail") if isinstance(value, dict) else None
+    return found if isinstance(found, str) else f"HTTP {code}"
+
+
+def _card(token, task_id):
+    from .telegram_bot import COLUMNS, PRIORITY_LABELS, QUESTION_KINDS, STATES, column_of
+
+    code, task = call(token, "GET", f"/api/tasks/{task_id}")
+    if code != 200:
+        return "Задача недоступна: " + _detail(code, task)
+    state = task["state"]
+    lines = [
+        f"{COLUMNS[column_of(state)][0]} *{task['title']}*",
+        f"*Статус:* {STATES.get(state, state)} · *приоритет:* "
+        + PRIORITY_LABELS.get(task.get("priority"), task.get("priority") or "обычный"),
+    ]
+    if task.get("reason"):
+        lines.append(f"*Причина:* {task['reason']}")
+    if state in {"needs_human", "review_required"}:
+        question = next(
+            (item for item in reversed(task.get("events") or []) if item.get("kind") in QUESTION_KINDS), None
+        )
+        if question:
+            lines += ["", "*Вопрос:*", str(question.get("message"))[:1500]]
+    if task.get("commit_url"):
+        lines.append(f"[🔗 Коммит]({task['commit_url']})")
+    lines += [f"[📋 Открыть карточку]({task_url(SimpleNamespace(id=task_id))})", f"`Task {task_id}`"]
+    return "\n".join(lines)
+
+
+def _projects(token, only_waiting):
+    from .telegram_bot import COLUMNS, task_label
+
+    code, projects = call(token, "GET", "/api/projects")
+    if code != 200:
+        return "Нет доступа к фабрике: " + _detail(code, projects)
+    lines, waiting = [], []
+    for project in projects[:20]:
+        code, tasks = call(token, "GET", f"/api/projects/{project['id']}/tasks")
+        tasks = tasks if code == 200 and isinstance(tasks, list) else []
+        waiting += [task for task in tasks if task["state"] in {"needs_human", "review_required"}]
+        counts = " · ".join(
+            f"{icon} {sum(task['state'] in states for task in tasks)}" for icon, _, states in COLUMNS
+        )
+        lines.append(f"📁 *{project['name']}* — {counts}")
+    if only_waiting:
+        if not waiting:
+            return "🙋 Никто не ждёт ответа."
+        rows = [f"• {task_label(task)} — `!task {task['id']}`" for task in waiting[:15]]
+        return f"🙋 *Ждут ответа* · {len(waiting)}\n" + "\n".join(rows)
+    if not lines:
+        return "📁 Проектов пока нет."
+    legend = " · ".join(f"{icon} {title}" for icon, title, _ in COLUMNS)
+    return "🏭 *Проекты*\n" + "\n".join(lines) + f"\n_{legend}_"
+
+
+def run_bang(channel_id, name, argument, ref, reply_to, thread_task, sender):
+    """A Rocket.Chat "!" command; in a task notification's thread it acts on that task."""
+    command = ALIASES.get(name)
+    with Session() as db:
+        channel = db.get(NotificationChannel, channel_id)
+        token = _config(channel).get("director_token")
+        key = "bang:" + _key(channel, ref)
+        if (
+            not token
+            or db.query(NotificationDelivery.id).filter_by(channel_id=channel_id, dedupe_key=key).first()
+        ):
+            return
+        try:
+            _access(db, channel, token)
+        except HTTPException:
+            token = None
+    task_id = argument if re.fullmatch(r"[0-9a-f]{32}", argument) else thread_task
+    if command is None:
+        result = f"Не знаю команду `!{name}`. Список команд: `!help`."
+    elif not token:
+        result = "Токен команд канала недействителен или без прав."
+    elif command == "help":
+        result = HELP
+    elif command in {"projects", "waiting"}:
+        result = _projects(token, command == "waiting")
+    elif not task_id:
+        result = f"Укажи задачу: `!{name} <id>` или напиши команду в треде уведомления о задаче."
+    elif command == "task":
+        result = _card(token, task_id)
+    else:
+        code, value = call(token, "POST", f"/api/tasks/{task_id}/actions", {"action": command})
+        if code == 200:
+            record_sender(task_id, "rocketchat", sender)
+            result = {
+                "resume": "▶️ Задача снова в очереди.",
+                "cancel": "🚫 Задача отменена.",
+                "merge": "✅ Слияние запущено.",
+            }[command]
+        else:
+            result = "Не выполнено: " + _detail(code, value)
+    with transaction() as db:
+        _reply(db, db.get(NotificationChannel, channel_id), key, result, reply_to)
 
 
 def queue_director_replies():

@@ -376,7 +376,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 チャットコマンドは、チャンネル設定でOperatorロールのAPIトークンを指定すると有効になります。コマンドはそのトークンの権限とプロジェクトスコープで実行されるため、必要最小限の権限を持つ専用トークンを発行してください。チャンネルはオーナートークンを受け付けません。`allowed_senders` がない場合は、チャットのどのメンバーでもコマンドを使えます。`allowed_senders` のリスト（Telegramの `from.id`、Rocket.Chatの `user_id`）がある場合は、リストにある送信者だけが使えます。送信者はタスクのイベントに記録されます。
 
-- `director テキスト`（または `/director テキスト`）で、Directorに依頼を渡します。プライバシーモードのTelegramグループでは、ボットには `/director` のみが見えます。Telegramではコマンドを含むメッセージに返信し、Rocket.Chatではそのメッセージのスレッドで返信します。Directorが処理中の間は、新しいコマンドは拒否されます。
+- `!director テキスト`（または `/director テキスト`）で、Directorに依頼を渡します。例：`!director タスクを表示`。プライバシーモードのTelegramグループでは、ボットには `/director` のみが見えます。Telegramではコマンドを含むメッセージに返信し、Rocket.Chatではそのメッセージのスレッドで返信します。Directorが処理中の間は、新しいコマンドは拒否されます。
 - 質問または停止通知への返信は、カードの「続行」ボタンと同様に、そのテキストでタスクを続行させます。Telegramでは、ボットのメッセージに返信するか、ボットとのプライベートチャットでコメントを付けて転送します。Rocket.Chatでは、通知のスレッドで返信します。
 - Telegramは `getUpdates` のロングポーリングで読み取られるため、公開アドレスは不要です。ボットにはwebhookを設定しないでください。1つのボットを共有するチャンネルは、チャットIDでメッセージを振り分けます。
 
@@ -393,7 +393,15 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ### Rocket.Chatコマンドの設定
 
-受信webhookと同じルームに、「メッセージ送信」イベントの送信webhookを作成します。URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>`（チャンネル一覧に表示されます）。webhookトークンはチャンネル設定で指定します。ボット自身のメッセージを除外しないでください。ファクトリーは、スレッドがどのタスクに属するかを知るためにそれらを使用します。Rocket.Chatは未知の `/director` を渡さないため、`director テキスト` と書いてください。
+受信webhookと同じルームに、「メッセージ送信」イベントの送信webhookを作成します。URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>`（チャンネル一覧に表示されます）。webhookトークンはチャンネル設定で指定します。トリガーワードは空のままにし、ボット自身のメッセージを除外しないでください。ファクトリーは、スレッドがどのタスクに属するかを知るためにそれらを使用します。Rocket.Chatは未知のスラッシュコマンドを渡さないため、そこではコマンドを `!` で始めます：
+
+- `!director テキスト`：Directorに依頼を渡します。
+- `!projects`：プロジェクトと、ボードの各列のタスク数。
+- `!waiting`：回答またはマージを待っているタスク。
+- `!task <id>`：タスクのカード。
+- `!help`：コマンド一覧。
+
+タスク通知のスレッドでは、通常のテキストがエージェントへの回答になり、`!task`、`!resume`、`!merge`、`!cancel` はそのタスクに作用します。通知は Darkfactory の名前で Rocket.Chat のmarkdownとして届きます。`DARKFACTORY_PUBLIC_URL` が設定されていれば、ファクトリーのロゴがアバターになります。
 
 ### マージ通知
 

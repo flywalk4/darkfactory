@@ -376,7 +376,7 @@ La entrega se ejecuta por separado de las tareas, con cinco intentos y un retras
 
 Los comandos de chat se activan con un token de API con el rol de operador en los ajustes del canal: los comandos se ejecutan con sus permisos y su alcance de proyecto, así que emite un token dedicado con el mínimo necesario. El canal no acepta un token de propietario. Sin `allowed_senders`, cualquier miembro del chat puede usar comandos; con una lista `allowed_senders` (Telegram `from.id`, Rocket.Chat `user_id`), solo pueden los indicados. El remitente se registra en el evento de la tarea.
 
-- `director texto` (o `/director texto`) encarga una tarea al Director. En los grupos de Telegram con modo de privacidad, el bot solo ve `/director`. Telegram responde al mensaje con el comando; Rocket.Chat responde en el hilo de ese mensaje. Mientras el Director está ocupado, un comando nuevo se rechaza.
+- `!director texto` (o `/director texto`) encarga una tarea al Director, por ejemplo `!director muestra las tareas`. En los grupos de Telegram con modo de privacidad, el bot solo ve `/director`. Telegram responde al mensaje con el comando; Rocket.Chat responde en el hilo de ese mensaje. Mientras el Director está ocupado, un comando nuevo se rechaza.
 - Una respuesta a una notificación de pregunta o de detención continúa la tarea con ese texto, igual que el botón "Continuar" de la tarjeta. En Telegram, responde al mensaje del bot o reenvíaselo en un chat privado con un comentario. En Rocket.Chat, responde en el hilo de la notificación.
 - Telegram se lee mediante long polling con `getUpdates`, por lo que no se necesita una dirección pública; el bot no debe tener un webhook. Los canales que comparten un bot se reparten los mensajes por ID de chat.
 
@@ -393,7 +393,15 @@ Con un token de comandos, el bot de Telegram ofrece un menú de botones. `/start
 
 ### Configurar los comandos de Rocket.Chat
 
-Crea un webhook saliente para el evento "Mensaje enviado" en la misma sala que el entrante. URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (se muestra en la lista de canales); define el token del webhook en los ajustes del canal. No excluyas los mensajes del bot: la fábrica los usa para saber a qué tarea pertenece un hilo. Rocket.Chat no transmite un `/director` desconocido, así que escribe `director texto`.
+Crea un webhook saliente para el evento "Mensaje enviado" en la misma sala que el entrante. URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (se muestra en la lista de canales); define el token del webhook en los ajustes del canal. Deja vacías las palabras de activación y no excluyas los mensajes del bot: la fábrica los usa para saber a qué tarea pertenece un hilo. Rocket.Chat no transmite comandos de barra desconocidos, así que allí los comandos empiezan con `!`:
+
+- `!director texto`: encarga una tarea al Director.
+- `!projects`: proyectos y número de tareas en cada columna del tablero.
+- `!waiting`: tareas que esperan una respuesta o una fusión.
+- `!task <id>`: la tarjeta de la tarea.
+- `!help`: la lista de comandos.
+
+En el hilo de una notificación de tarea, el texto normal es la respuesta al agente, y `!task`, `!resume`, `!merge` y `!cancel` actúan sobre esa tarea. Las notificaciones llegan como markdown de Rocket.Chat con el nombre Darkfactory; si se define `DARKFACTORY_PUBLIC_URL`, el logo de la fábrica es su avatar.
 
 ### Notificaciones de merge
 

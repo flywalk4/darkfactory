@@ -376,7 +376,7 @@ L'envoi s'exécute séparément des tâches, avec cinq tentatives et un délai e
 
 Les commandes de chat s'activent avec un jeton d'API de rôle operator dans les paramètres du canal : les commandes s'exécutent avec ses permissions et sa portée de projet ; émettez donc un jeton dédié au minimum nécessaire. Le canal n'accepte pas de jeton de propriétaire. Sans `allowed_senders`, tout membre du chat peut utiliser les commandes ; avec une liste `allowed_senders` (Telegram `from.id`, Rocket.Chat `user_id`), seuls les expéditeurs listés le peuvent. L'expéditeur est consigné dans l'événement de la tâche.
 
-- `director texte` (ou `/director texte`) confie une mission au Director. Dans les groupes Telegram avec mode confidentialité, le bot ne voit que `/director`. Telegram répond au message contenant la commande, Rocket.Chat répond dans le fil de ce message. Tant que le Director est occupé, une nouvelle commande est refusée.
+- `!director texte` (ou `/director texte`) confie une mission au Director, par exemple `!director affiche les tâches`. Dans les groupes Telegram avec mode confidentialité, le bot ne voit que `/director`. Telegram répond au message contenant la commande, Rocket.Chat répond dans le fil de ce message. Tant que le Director est occupé, une nouvelle commande est refusée.
 - Une réponse à une notification de question ou d'arrêt poursuit la tâche avec ce texte, comme le bouton « Continuer » de la fiche. Dans Telegram, répondez au message du bot ou transférez-le au bot dans un chat privé avec un commentaire. Dans Rocket.Chat, répondez dans le fil de la notification.
 - Telegram est lu par long polling via `getUpdates`, aucune adresse publique n'est donc nécessaire ; le bot ne doit pas avoir de webhook. Les canaux partageant un même bot répartissent les messages par identifiant de chat.
 
@@ -393,7 +393,15 @@ Avec un jeton de commande, le bot Telegram propose un menu à boutons. `/start` 
 
 ### Configuration des commandes Rocket.Chat
 
-Créez un webhook sortant pour l'événement « Message envoyé » dans le même salon que le webhook entrant. URL : `https://<factory>/api/chat-commands/rocketchat/<channel id>` (affichée dans la liste des canaux) ; définissez le jeton du webhook dans les paramètres du canal. N'excluez pas les messages du bot : l'usine s'en sert pour savoir à quelle tâche appartient un fil. Rocket.Chat ne transmet pas un `/director` inconnu ; écrivez donc `director texte`.
+Créez un webhook sortant pour l'événement « Message envoyé » dans le même salon que le webhook entrant. URL : `https://<factory>/api/chat-commands/rocketchat/<channel id>` (affichée dans la liste des canaux) ; définissez le jeton du webhook dans les paramètres du canal. Laissez les mots déclencheurs vides et n'excluez pas les messages du bot : l'usine s'en sert pour savoir à quelle tâche appartient un fil. Rocket.Chat ne transmet pas les slash commandes inconnues ; les commandes y commencent donc par `!` :
+
+- `!director texte` : confie une mission au Director.
+- `!projects` : les projets et le nombre de tâches dans chaque colonne du tableau.
+- `!waiting` : les tâches en attente d'une réponse ou d'une fusion.
+- `!task <id>` : la fiche de la tâche.
+- `!help` : la liste des commandes.
+
+Dans le fil d'une notification de tâche, un texte simple est la réponse à l'agent, et `!task`, `!resume`, `!merge` et `!cancel` agissent sur cette tâche. Les notifications arrivent en markdown Rocket.Chat sous le nom Darkfactory ; si `DARKFACTORY_PUBLIC_URL` est défini, le logo de l'usine sert d'avatar.
 
 ### Notifications de fusion
 

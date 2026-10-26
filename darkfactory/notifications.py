@@ -27,7 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base, Event, Project, Session, decrypt, now, transaction, uid
-from .task_links import commit_url, task_url
+from .task_links import commit_url, public_asset, task_url
 
 # A long task extends itself while it progresses, so "budget_warning" stays in the task history only.
 IMPORTANT_KINDS = frozenset(
@@ -429,6 +429,65 @@ def _due(at):
     )
 
 
+# Rocket.Chat shows markdown: a headline with an icon, bold field names and named links.
+ROCKET_HEADLINES = [
+    ("Darkfactory · Выполнено: ", "✅", "Выполнено"),
+    ("Darkfactory взяла задачу в работу: ", "🛠️", "Взята в работу"),
+    ("Darkfactory · подзадача: ", "🧩", "Подзадача"),
+    ("Darkfactory · сделано в этом прогоне: ", "📝", "Сделано в этом прогоне"),
+    ("Директор: ", "🧠", "Директор"),
+]
+ROCKET_LINKS = {"Карточка": "📋 Открыть карточку", "Задача": "📋 Открыть карточку", "Коммит": "🔗 Коммит"}
+ROCKET_STATES = {
+    "needs_human": "🙋 нужно твоё решение",
+    "review_required": "👀 ждёт слияния человеком",
+    "running": "⚙️ в работе",
+    "queued": "⏳ в очереди",
+    "merged": "✅ принята",
+    "cancelled": "🚫 отменена",
+    "failed": "❌ ошибка",
+    "stopped": "⏸️ остановлена",
+}
+TASK_LINE = re.compile(r"^Task ([0-9a-f]{32}) · (\w+)$")
+
+
+def rocketchat_text(body, commands=False):
+    """Present a plain notification as Rocket.Chat markdown, keeping the task ID the webhook echo reads."""
+    lines = body.split("\n")
+    head, rest = lines[0], lines[1:]
+    for prefix, icon, label in ROCKET_HEADLINES:
+        if head.startswith(prefix):
+            head = f"{icon} *{label}:* {head[len(prefix) :]}"
+            break
+    else:
+        if head.startswith("Darkfactory · "):
+            title = head[len("Darkfactory · ") :]
+            head = f"⚠️ *{title}*" if not rest else f"🔔 *{title}*"
+    out, waiting = [head], False
+    for line in rest:
+        task = TASK_LINE.match(line)
+        name, sep, value = line.partition(": ")
+        if task:
+            waiting = task.group(2) in {"needs_human", "review_required"}
+            out.append(f"`Task {task.group(1)}` · {ROCKET_STATES.get(task.group(2), task.group(2))}")
+        elif sep and re.fullmatch(r"https?://\S+", value) and name in ROCKET_LINKS:
+            out.append(f"[{ROCKET_LINKS[name]}]({value})")
+        elif sep and re.fullmatch(r"https?://\S+", value):
+            out.append(f"[{name}]({value})")
+        elif sep and name in {"Проект", "Коммит"}:
+            out.append(f"*{name}:* `{value}`" if name == "Коммит" else f"*{name}:* {value}")
+        elif re.fullmatch(r"https?://\S+", line):
+            out.append(f"[🔗 {urlsplit(line).hostname}]({line})")
+        else:
+            out.append(line)
+    if waiting and commands:
+        out += [
+            "",
+            "💬 _Ответь в треде этого сообщения — агент получит ответ и продолжит. `!help` — команды._",
+        ]
+    return "\n".join(out)
+
+
 def _claim():
     owner = uid()
     with transaction() as db:
@@ -527,7 +586,12 @@ def _send(client, claimed):
             }
     else:
         url = config["webhook_url"]
-        payload = {"text": body}
+        payload = {
+            "text": rocketchat_text(body, commands=bool(config.get("director_token"))),
+            "alias": "Darkfactory",
+        }
+        if avatar := public_asset("logo.png"):
+            payload["avatar"] = avatar
         if reply_to.get("room_id"):
             payload["roomId"] = reply_to["room_id"]
         elif claimed.get("recipient"):

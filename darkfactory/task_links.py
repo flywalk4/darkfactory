@@ -35,6 +35,12 @@ def task_url(task, *, commit=None):
     return root + "/?" + urlencode(query)
 
 
+def public_asset(name):
+    """A static file's URL for chat avatars, only when the factory has a configured public address."""
+    base = _web_base(os.getenv("DARKFACTORY_PUBLIC_URL", ""))
+    return f"{urlunsplit(base).rstrip('/')}/static/{name}" if base else None
+
+
 def commit_url(project, task):
     sha = task.result_sha
     if not sha or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):

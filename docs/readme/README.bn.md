@@ -376,7 +376,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 চ্যানেল সেটিংসে operator রোলের একটি API token দিয়ে চ্যাট কমান্ড চালু করা হয়: কমান্ড এর অনুমতি ও প্রজেক্ট scope-এ চলে, তাই ন্যূনতম প্রয়োজনীয় অনুমতিসহ একটি নির্দিষ্ট token ইস্যু করুন। চ্যানেল owner token গ্রহণ করে না। `allowed_senders` ছাড়া চ্যাটের যেকোনো সদস্য কমান্ড ব্যবহার করতে পারে; `allowed_senders` তালিকা (Telegram `from.id`, Rocket.Chat `user_id`) থাকলে শুধু তালিকাভুক্তরা পারে। প্রেরক টাস্ক ইভেন্টে রেকর্ড হয়।
 
-- `director text` (বা `/director text`) Director-কে একটি কাজ হস্তান্তর করে। প্রাইভেসি মোডসহ Telegram গ্রুপে bot শুধু `/director` দেখতে পায়। Telegram কমান্ডসহ বার্তার উত্তরে জবাব দেয়, Rocket.Chat সেই বার্তার থ্রেডে জবাব দেয়। Director ব্যস্ত থাকলে নতুন কমান্ড প্রত্যাখ্যাত হয়।
+- `!director text` (বা `/director text`) Director-কে একটি কাজ হস্তান্তর করে, যেমন `!director টাস্কগুলো দেখাও`। প্রাইভেসি মোডসহ Telegram গ্রুপে bot শুধু `/director` দেখতে পায়। Telegram কমান্ডসহ বার্তার উত্তরে জবাব দেয়, Rocket.Chat সেই বার্তার থ্রেডে জবাব দেয়। Director ব্যস্ত থাকলে নতুন কমান্ড প্রত্যাখ্যাত হয়।
 - প্রশ্ন বা স্টপ নোটিফিকেশনের উত্তর সেই টেক্সট দিয়ে টাস্ক চালিয়ে যায়, কার্ডের "Continue" বোতামের মতো। Telegram-এ bot-এর বার্তার উত্তর দিন বা মন্তব্যসহ প্রাইভেট চ্যাটে সেটি bot-কে ফরওয়ার্ড করুন। Rocket.Chat-এ নোটিফিকেশনের থ্রেডে উত্তর দিন।
 - Telegram `getUpdates`-এর মাধ্যমে long polling করে পড়া হয়, তাই কোনো পাবলিক ঠিকানা লাগে না; bot-এর কোনো webhook থাকা চলবে না। একই bot ভাগ করা চ্যানেলগুলো chat ID অনুযায়ী বার্তা ভাগ করে নেয়।
 
@@ -393,7 +393,15 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ### Rocket.Chat কমান্ড সেট আপ
 
-"Message sent" ইভেন্টের জন্য, incoming webhook-এর একই রুমে একটি outgoing webhook তৈরি করুন। URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (চ্যানেল তালিকায় দেখানো হয়); চ্যানেল সেটিংসে webhook token দিন। bot-এর বার্তা বাদ দেবেন না: ফ্যাক্টরি সেগুলো দিয়ে জানে একটি থ্রেড কোন টাস্কের। Rocket.Chat অজানা `/director` পাস করে না, তাই `director text` লিখুন।
+"Message sent" ইভেন্টের জন্য, incoming webhook-এর একই রুমে একটি outgoing webhook তৈরি করুন। URL: `https://<factory>/api/chat-commands/rocketchat/<channel id>` (চ্যানেল তালিকায় দেখানো হয়); চ্যানেল সেটিংসে webhook token দিন। ট্রিগার শব্দ ফাঁকা রাখুন এবং bot-এর বার্তা বাদ দেবেন না: ফ্যাক্টরি সেগুলো দিয়ে জানে একটি থ্রেড কোন টাস্কের। Rocket.Chat অজানা slash কমান্ড পাঠায় না, তাই সেখানে কমান্ড শুরু হয় `!` দিয়ে:
+
+- `!director text`: Director-কে একটি কাজ হস্তান্তর।
+- `!projects`: প্রজেক্ট এবং বোর্ডের প্রতিটি কলামে টাস্কের সংখ্যা।
+- `!waiting`: উত্তর বা merge-এর অপেক্ষায় থাকা টাস্ক।
+- `!task <id>`: টাস্ক কার্ড।
+- `!help`: কমান্ডের তালিকা।
+
+টাস্ক-নোটিফিকেশনের থ্রেডে সাধারণ লেখা এজেন্টের উত্তর, আর `!task`, `!resume`, `!merge` ও `!cancel` ওই টাস্কের উপর কাজ করে। নোটিফিকেশন Darkfactory নামে Rocket.Chat markdown-এ আসে; `DARKFACTORY_PUBLIC_URL` সেট থাকলে ফ্যাক্টরির লোগো তাদের avatar হয়।
 
 ### মার্জ নোটিফিকেশন
 

@@ -413,7 +413,12 @@ def test_rocket_command_and_thread_answer(client, setup_project):
     assert rocket(client, channel, "Director: что в очереди?", "m1").status_code == 200
     director.advance_dialogues(Model({"reply": "Очередь пуста.", "actions": []}))
     sent = deliver()
-    assert sent[0] == {"text": "Директор: Очередь пуста.", "roomId": "ROOM", "tmid": "m1"}
+    assert sent[0] == {
+        "text": "🧠 *Директор:* Очередь пуста.",
+        "alias": "Darkfactory",
+        "roomId": "ROOM",
+        "tmid": "m1",
+    }
 
     task_id = stopped_task(client, project)
     with db.transaction() as session:
@@ -427,7 +432,12 @@ def test_rocket_command_and_thread_answer(client, setup_project):
     assert rocket(client, channel, "Бери PostgreSQL", "r1", tmid="n1").status_code == 200
     assert client.get(f"/api/tasks/{task_id}").json()["state"] != "needs_human"
     sent = deliver()
-    assert sent[0] == {"text": "Ответ передан, задача продолжена.", "roomId": "ROOM", "tmid": "n1"}
+    assert sent[0] == {
+        "text": "Ответ передан, задача продолжена.",
+        "alias": "Darkfactory",
+        "roomId": "ROOM",
+        "tmid": "n1",
+    }
     # Unrelated thread replies and plain messages do nothing.
     rocket(client, channel, "спасибо", "r2", tmid="other")
     rocket(client, channel, "привет", "r3")
@@ -435,3 +445,50 @@ def test_rocket_command_and_thread_answer(client, setup_project):
     assert deliver() == []
     with db.Session() as session:
         assert session.get(NotificationChannel, channel["id"]).command_offset is None
+
+
+def test_rocket_bang_commands(client, setup_project, monkeypatch):
+    project, pool = setup_project
+    connect(client, pool)
+    channel = save_channel(
+        client, "rocketchat", director_token=command_token(client), outgoing_token=OUTGOING
+    )
+    rocket(client, channel, "!director покажи задачи", "m1")
+    with db.Session() as session:
+        assert session.query(director.Dialogue).one().request == "покажи задачи"
+
+    rocket(client, channel, "!help", "h1")
+    rocket(client, channel, "!непонятно", "h2")
+    help_text, unknown = (item["text"] for item in deliver())
+    assert "`!director текст`" in help_text and "`!waiting`" in help_text
+    assert "`!непонятно`" in unknown and "`!help`" in unknown
+
+    task_id = stopped_task(client, project)
+    rocket(client, channel, "!projects", "p1")
+    rocket(client, channel, "!waiting", "w1")
+    rocket(client, channel, f"!task {task_id}", "t1")
+    projects, waiting, card = (item["text"] for item in deliver())
+    assert "📁 *" in projects and "🙋 1" in projects
+    assert f"`!task {task_id}`" in waiting
+    assert f"`Task {task_id}`" in card and "Нужно решение" in card
+
+    # In a notification's thread "!" commands act on that task.
+    with db.transaction() as session:
+        session.add(
+            NotificationDelivery(
+                channel_id=channel["id"], task_id=task_id, dedupe_key="q", message="q", state="sent"
+            )
+        )
+    rocket(client, channel, f"Darkfactory · Fix\nTask {task_id} · needs_human", "n1", bot={"i": "hook"})
+    rocket(client, channel, "!task", "t2", tmid="n1")
+    assert f"`Task {task_id}`" in deliver()[0]["text"]
+    rocket(client, channel, "!cancel", "c1", tmid="n1")
+    assert deliver()[0] == {
+        "text": "🚫 Задача отменена.",
+        "alias": "Darkfactory",
+        "roomId": "ROOM",
+        "tmid": "n1",
+    }
+    assert client.get(f"/api/tasks/{task_id}").json()["state"] == "cancelled"
+    rocket(client, channel, "!resume", "c2")
+    assert "Укажи задачу" in deliver()[0]["text"]

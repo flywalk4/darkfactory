@@ -376,7 +376,7 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 聊天命令通过渠道设置中具有 operator 角色的 API 令牌启用：命令以该令牌的权限和项目范围执行，因此请签发一个权限最小的专用令牌。渠道不接受 owner 令牌。未设置 `allowed_senders` 时，任何聊天成员都可以使用命令；设置了 `allowed_senders` 列表（Telegram `from.id`、Rocket.Chat `user_id`）后，只有列表中的人可以。发送者会记录在任务事件中。
 
-- `director text`（或 `/director text`）把任务交给 Director。在开启隐私模式的 Telegram 群组中，机器人只能看到 `/director`。Telegram 会回复带有命令的那条消息，Rocket.Chat 在该消息的线程中回复。Director 忙碌时，新命令会被拒绝。
+- `!director text`（或 `/director text`）把任务交给 Director，例如 `!director 显示任务`。在开启隐私模式的 Telegram 群组中，机器人只能看到 `/director`。Telegram 会回复带有命令的那条消息，Rocket.Chat 在该消息的线程中回复。Director 忙碌时，新命令会被拒绝。
 - 对提问或停止通知的回复会用这段文本继续任务，就像卡片中的“继续”按钮。在 Telegram 中，请回复机器人的消息，或在与机器人的私聊中附加评论后转发给它。在 Rocket.Chat 中，请在通知的线程中回复。
 - Telegram 通过 `getUpdates` 以长轮询方式读取，因此不需要公网地址；机器人不能设置 webhook。共用同一个机器人的渠道按聊天 ID 分流消息。
 
@@ -393,7 +393,15 @@ uv run darkfactory director --token-file /path/to/api-token --project PROJECT_ID
 
 ### 设置 Rocket.Chat 命令
 
-在与 incoming webhook 相同的房间中，为“Message sent”事件创建 outgoing webhook。URL：`https://<factory>/api/chat-commands/rocketchat/<channel id>`（显示在渠道列表中）；在渠道设置中设置 webhook 令牌。不要排除机器人的消息：工厂用它们来判断某个线程属于哪个任务。Rocket.Chat 不会传递未知的 `/director`，因此请写成 `director text`。
+在与 incoming webhook 相同的房间中，为“Message sent”事件创建 outgoing webhook。URL：`https://<factory>/api/chat-commands/rocketchat/<channel id>`（显示在渠道列表中）；在渠道设置中设置 webhook 令牌。触发词留空，且不要排除机器人的消息：工厂用它们来判断某个线程属于哪个任务。Rocket.Chat 不会传递未知的斜杠命令，因此那里的命令以 `!` 开头：
+
+- `!director text`：把任务交给 Director。
+- `!projects`：项目以及看板每一列中的任务数。
+- `!waiting`：等待回答或合并的任务。
+- `!task <id>`：任务卡片。
+- `!help`：命令列表。
+
+在任务通知的线程中，普通文本是对代理的回答，`!task`、`!resume`、`!merge` 和 `!cancel` 则作用于该任务。通知以 Darkfactory 的名义以 Rocket.Chat markdown 形式送达；设置了 `DARKFACTORY_PUBLIC_URL` 后，工厂的徽标即为其头像。
 
 ### 合并通知
 
