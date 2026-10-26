@@ -96,9 +96,15 @@ def _sources(db, project, since, until, snapshots):
                     sources.append(("worker_error", item["message"]))
             except (ValueError, KeyError, TypeError):
                 continue
-    update = _json(system / "self-update.json")
-    if update.get("state") in {"rolled_back", "failed"}:
-        snapshot("self_update", update["state"], update, update.get("message", ""), update.get("at"))
+    selfupdate = _json(system / "self-update.json")
+    if selfupdate.get("state") in {"rolled_back", "failed"}:
+        snapshot(
+            "self_update",
+            selfupdate["state"],
+            selfupdate,
+            selfupdate.get("message", ""),
+            selfupdate.get("at"),
+        )
     return projects, sources
 
 

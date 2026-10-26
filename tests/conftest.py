@@ -83,3 +83,11 @@ def connect(client, pool, provider="claude", account="account-1"):
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@pytest.fixture(autouse=True)
+def isolate_agent_session_env(monkeypatch):
+    """Tests must not depend on the agent session or evidence directory of whoever runs them."""
+    for name in list(os.environ):
+        if name.startswith("CLAUDE") or name == "DARKFACTORY_EVIDENCE_DIR":
+            monkeypatch.delenv(name)
