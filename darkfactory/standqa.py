@@ -263,6 +263,15 @@ def open_bugs(db, project):
     ]
 
 
+def known_bugs(db, project):
+    """Bugs not to report again: open ones and fixed ones the stand has not received yet."""
+    return open_bugs(db, project) + to_verify(db, project)
+
+
+def known_line(task):
+    return f"- {task.title}" + (" (fixed, waiting for a deploy)" if task.state == "merged" else "")
+
+
 def to_verify(db, project):
     """Stand bugs whose fix reached preprod and has not been re-checked on the stand yet."""
     return [
@@ -297,10 +306,10 @@ def prompt(db, project, current):
                 + "\n".join(f"- {task.id}: {task.title}\n  {task.request[:1500]}" for task in pending[:10])
                 + "\n"
             )
-    known = open_bugs(db, project)
+    known = known_bugs(db, project)
     known_text = (
-        "\nKnown open stand bugs (do not report again):\n"
-        + "\n".join(f"- {task.title}" for task in known[:40])
+        "\nKnown stand bugs (do not report again):\n"
+        + "\n".join(known_line(task) for task in known[:40])
         + "\n"
         if known
         else ""
@@ -364,7 +373,7 @@ def bug_request(url, bug):
 
 def create(db, project, report, run, probe_id):
     url, _ = stand(project)
-    known = {(task.role_config or {})["qa"].get("fingerprint") for task in open_bugs(db, project)}
+    known = {(task.role_config or {})["qa"].get("fingerprint") for task in known_bugs(db, project)}
     created = []
     for bug in report.bugs[: max_tasks(project)]:
         key = fingerprint(bug.title)

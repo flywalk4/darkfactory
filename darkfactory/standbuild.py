@@ -18,7 +18,7 @@ from sqlalchemy import select
 from . import service
 from .backlog import checkout
 from .db import Project, Task, decrypt, event, now, transaction, uid
-from .standqa import SEVERITY, attach, fingerprint, latest_run, open_bugs, stand
+from .standqa import SEVERITY, attach, fingerprint, known_bugs, known_line, latest_run, stand
 
 log = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ def due(project):
 def prompt(db, project, current, task_text):
     url, hosts = stand(project)
     settings = config(project)
-    known = open_bugs(db, project)
+    known = known_bugs(db, project)
     history = current.get("history") or []
     return PROMPT.format(
         url=url,
@@ -200,8 +200,8 @@ def prompt(db, project, current, task_text):
         task=task_text,
         limit=max_tasks(project),
         known=(
-            "\nKnown open problems (do not report again):\n"
-            + "\n".join(f"- {t.title}" for t in known[:40])
+            "\nKnown problems (do not report again):\n"
+            + "\n".join(known_line(t) for t in known[:40])
             + "\n"
             if known
             else ""
@@ -235,7 +235,7 @@ def problem_request(url, task_text, problem):
 
 def create(db, project, result, task_text, run, probe_id):
     url, _ = stand(project)
-    known = {(item.role_config or {})["qa"].get("fingerprint") for item in open_bugs(db, project)}
+    known = {(item.role_config or {})["qa"].get("fingerprint") for item in known_bugs(db, project)}
     created = []
     for problem in result.problems[: max_tasks(project)]:
         key = fingerprint(problem.title)
