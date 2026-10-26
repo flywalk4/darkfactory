@@ -42,6 +42,18 @@ CHECKLIST = (
 # Unmet, these block approval; the others become backlog notes.
 BLOCKING_CHECKS = {"acceptance_met", "no_regression_in_touched_code", "no_secrets_or_unsafe_input"}
 REVIEW_CONFIDENCE = int(os.getenv("DARKFACTORY_REVIEW_CONFIDENCE", "80"))
+# A finding that names an unmet Definition-of-Done item is the task not done, however unsure or minor the
+# reviewer filed it: a feature only behind a flag or URL parameter, an API nothing calls, a report instead of
+# the change, a missing production-impact section. As a [LATER] note it let such tasks pass as done.
+UNDONE = re.compile(
+    r"feature[- ]flag|behind (?:a |the )?(?:flag|toggle|query|url)|(?:url|query)[- ]param"
+    r"|за флаг|под флаг|по флагу|параметр\w* (?:url|запроса)"
+    r"|dead (?:api|code|endpoint)|no callers?\b|never called|nothing calls|not called anywhere"
+    r"|мёртв\w* (?:api|код)|мертв\w* (?:api|код)|никто не вызывает|нет вызыва|не вызывается"
+    r"|report[- ]only|only (?:a |the )?reports?\b|только отч[её]т"
+    r"|prod(?:uction)?[- ]impact|влияни\w* на прод",
+    re.IGNORECASE,
+)
 REVIEW_SCHEMA = {
     "type": "object",
     "properties": {
@@ -271,8 +283,8 @@ def classify(value):
 
 def json_object(text):
     """The review verdict as {"approved", "findings": [str]}. A checklist verdict is decided here, by the
-    factory: only confident blocker/major findings and unmet blocking checks reject; everything else becomes
-    a [LATER] note, and sandbox gaps an [ENV] one."""
+    factory: confident blocker/major findings, findings that name an unmet Definition-of-Done item and unmet
+    blocking checks reject; everything else becomes a [LATER] note, and sandbox gaps an [ENV] one."""
     value = json.loads(text)
     if isinstance(value, dict) and {"checklist", "findings"} <= set(value) <= {
         "checklist",
@@ -333,6 +345,8 @@ def checklist_verdict(value):
             (blocked if confident and "acceptance_met" in unmet else notes).append("[ENV] " + text)
         elif confident:
             blocked.append(text)
+        elif UNDONE.search(item["text"]):
+            blocked.append("Не сделано (критерий готовности): " + text)
         else:
             notes.append("[LATER] " + text)
     for item in unmet:

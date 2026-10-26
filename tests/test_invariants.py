@@ -354,3 +354,31 @@ def test_unmet_acceptance_carries_the_reviewers_reasons():
         "a.ts:3 — no period filter",
         "b.ts: export ignores the user's permissions entirely",
     ]
+
+
+def test_finding_that_names_an_unmet_definition_of_done_item_rejects():
+    import json
+
+    from darkfactory import runner
+
+    ok = dict.fromkeys(runner.CHECKLIST, True)
+
+    def verdict(severity, confidence, text):
+        finding = {"severity": severity, "confidence": confidence, "env": False, "text": text}
+        return json_object(json.dumps({"checklist": ok, "findings": [finding]}))
+
+    # Unsure or minor, these used to become [LATER] notes and the task was accepted as done.
+    for text in (
+        "Compact panel is shown only behind the ?panel=compact URL param",
+        "Новая панель включается только по флагу в localStorage",
+        "WriterModelHash is threaded through the stack but has no callers",
+        "Изменение только отчёт в docs/reviews, код не менялся",
+        "Missing production impact section in the change description",
+    ):
+        rejected = verdict("minor", 50, text)
+        assert rejected["approved"] is False, text
+        assert rejected["findings"] == ["Не сделано (критерий готовности): " + text]
+    assert verdict("minor", 50, "rename the helper") == {
+        "approved": True,
+        "findings": ["[LATER] rename the helper"],
+    }
