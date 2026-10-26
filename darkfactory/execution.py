@@ -985,6 +985,9 @@ class DockerExecutor:
                 cap_drop=["ALL"],
                 cap_add=RUNNER_CAPABILITIES,
                 security_opt=["no-new-privileges:true"],
+                # The runner is not an init: orphans (detached git maintenance, killed test servers) stayed
+                # zombies until the process limit was reached and every fork failed. Docker's init reaps them.
+                init=True,
                 # A dev server, a browser and a dotnet/git test run together exceed 256 processes.
                 pids_limit=int(os.getenv("DARKFACTORY_EXECUTOR_PIDS", "1024")),
                 mem_limit=os.getenv("DARKFACTORY_EXECUTOR_MEMORY", "4g"),

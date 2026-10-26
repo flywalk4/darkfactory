@@ -203,6 +203,7 @@ def test_writer_prompt_names_the_skill_and_not_the_rules(client, setup_project, 
     jobs = []
 
     def create(_image, **kwargs):
+        assert kwargs["init"] is True
         # The job file exists only while the run is being started.
         jobs.extend(json.loads(path.read_text()) for path in (db.ROOT / "jobs").glob("*/input.json"))
         raise Captured()
