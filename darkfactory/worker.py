@@ -26,6 +26,7 @@ from . import (
     promotions,
     schedules,
     service,
+    standbuild,
     standqa,
     toolchains,
     usage,
@@ -1714,6 +1715,11 @@ def periodic(future, pool, job):
     return pool.submit(job)
 
 
+def test_stands():
+    """Stand tests and stand builds share one browser slot: a build waits for a running test and back."""
+    return standqa.run() or standbuild.run()
+
+
 def heartbeat():
     """The host's self-update script reads this to tell a live scheduler from a crashed one."""
     try:
@@ -1791,7 +1797,7 @@ def main():
                     grouping = periodic(grouping, backlogs, backlog.plan)
                 # A stand run takes up to half an hour; deploys only poll GitLab.
                 if standqa.enabled():
-                    testing = periodic(testing, testers, standqa.run)
+                    testing = periodic(testing, testers, test_stands)
                 releasing = periodic(releasing, releases, deploys.advance)
                 promotion = periodic(promotion, promoting, promotions.auto_promote)
                 heartbeat()

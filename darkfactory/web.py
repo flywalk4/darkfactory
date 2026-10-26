@@ -76,6 +76,9 @@ def project_settings(row):
         qa_instructions=config.get("qa_instructions", ""),
         deploy_job=config.get("deploy_job"),
         auto_promote_hours=config.get("auto_promote_hours", 0),
+        build_tasks=config.get("build_tasks") or [],
+        build_instructions=config.get("build_instructions", ""),
+        build_max_tasks=config.get("build_max_tasks", 3),
         environment={
             name: item
             for name, item in toolchains.state(row.id).items()
