@@ -16,6 +16,7 @@ from ..db import (
     Connection,
     Pool,
     Session,
+    Task,
     decrypt,
     encrypt,
     now,
@@ -283,3 +284,32 @@ def update_connection(connection_id: str, value: ConnectionSettings, a=Depends(a
         elif connection.status == "disabled":
             connection.status = "ready"
         return public(connection)
+
+
+@router.delete("/api/connections/{connection_id}")
+def delete_connection(connection_id: str, a=Depends(access)):
+    """Forget the account and its stored authorization; tasks that ran on it keep their history."""
+    a.organization_owner()
+    with transaction() as db:
+        connection = db.get(Connection, connection_id)
+        if not connection or connection.org_id != a.org_id:
+            raise HTTPException(404)
+        busy = db.scalar(
+            select(Task.id).where(
+                Task.connection_id == connection_id, Task.state.in_(("running", "recovering"))
+            )
+        )
+        if connection.lease_task or busy:
+            raise HTTPException(409, "Подключение занято; дождись конца запуска или останови задачу")
+        if db.scalar(
+            select(LoginSession.id).where(
+                LoginSession.connection_id == connection_id, LoginSession.status.in_(LOGIN_ACTIVE)
+            )
+        ):
+            raise HTTPException(409, "Сначала заверши или отмени вход в эту подписку")
+        for login in db.scalars(select(LoginSession).where(LoginSession.connection_id == connection_id)):
+            login.connection_id = None
+        for task in db.scalars(select(Task).where(Task.connection_id == connection_id)):
+            task.connection_id = None
+        db.delete(connection)
+        return {"deleted": connection_id}

@@ -270,6 +270,13 @@ function deleteProject(project) {
   $('#submit-modal').textContent=tr('Удалить проект');
 }
 const credentialsPlaceholder='Claude: {"oauth_token":"…"}\nCodex: {"auth_method":"siwc","accessToken":"…"}\nAPI: {"api_key":"…","base_url":"https://…/v1","input_usd_per_million":0,"output_usd_per_million":0}';
+function deleteConnection(connection) {
+  modal(tr('Удалить подписку «{name}»?',{name:connection.name}),`<p>${tr('Фабрика забудет этот аккаунт и его авторизацию. История задач сохранится. Чтобы вернуть подписку, её придётся подключить заново.')}</p>`,async()=>{
+    await api('/connections/'+connection.id,'DELETE');
+    toast(tr('Подписка удалена'));
+  });
+  $('#submit-modal').textContent=tr('Удалить подписку');
+}
 function connectionForm(connection) {
   const creating=!connection;
   let fields=field('name',tr('Название'),{value:connection?.name||''});
@@ -329,11 +336,12 @@ async function settings() {
   const poolRows=organization+(poolList.length?poolList.map(p=>`<div class="setting-row"><strong>${esc(p.name)}</strong><small>${p.cross_runtime?tr('Codex ↔ Claude разрешён'):tr('Один исполнитель')} · ${tr('до {n} запусков',{n:p.max_active??2})} · ${esc((p.allowed_providers||['codex','claude','api']).join(', '))}</small>${orgOwner?`<div class="setting-actions"><button class="quiet" data-edit-pool="${p.id}">${tr('Настроить пул →')}</button><button class="quiet" data-delete-pool="${p.id}">${tr('Удалить пул')}</button></div>`:''}</div>`).join(''):'<p>'+tr('Создай пул и подключи аккаунты исполнителей.')+'</p>');
   if(owner) {
     const [connections,members]=await Promise.all([api('/connections'),api('/members')]);
-    $('#connections').innerHTML=connections.map(c=>`<div class="setting-row"><strong>${esc(c.name)} · ${esc(c.provider)}</strong><small>${esc(c.status)} · ${esc(quotaSummary(c))} · ${tr('источник: {source}',{source:esc(c.quota_source)})} · ${tr('приоритет {n}',{n:c.priority})}${c.lease_task?' · '+tr('занят'):''}${c.retry_at?' · '+tr('повтор {time}',{time:esc(new Date(c.retry_at*1000).toLocaleString(LOCALE))}):''}</small>${orgOwner?`<div class="setting-actions"><button class="quiet" data-edit-connection="${c.id}" ${c.lease_task?'disabled':''}>${tr('Настроить')}</button>${c.status==='quota'?`<button class="quiet" data-recheck="${c.id}">${tr('Лимит сброшен — проверить сейчас')}</button>`:''}<button class="quiet" data-reconnect="${c.id}" ${c.lease_task?'disabled':''}>${tr('Обновить авторизацию')}</button></div>`:''}</div>`).join('')||'<p>'+tr('Подключений пока нет. Задачи будут ждать пул.')+'</p>';
+    $('#connections').innerHTML=connections.map(c=>`<div class="setting-row"><strong>${esc(c.name)} · ${esc(c.provider)}</strong><small>${esc(c.status)} · ${esc(quotaSummary(c))} · ${tr('источник: {source}',{source:esc(c.quota_source)})} · ${tr('приоритет {n}',{n:c.priority})}${c.lease_task?' · '+tr('занят'):''}${c.retry_at?' · '+tr('повтор {time}',{time:esc(new Date(c.retry_at*1000).toLocaleString(LOCALE))}):''}</small>${orgOwner?`<div class="setting-actions"><button class="quiet" data-edit-connection="${c.id}" ${c.lease_task?'disabled':''}>${tr('Настроить')}</button>${c.status==='quota'?`<button class="quiet" data-recheck="${c.id}">${tr('Лимит сброшен — проверить сейчас')}</button>`:''}<button class="quiet" data-reconnect="${c.id}" ${c.lease_task?'disabled':''}>${tr('Обновить авторизацию')}</button><button class="quiet" data-delete-connection="${c.id}" ${c.lease_task?'disabled':''}>${tr('Удалить подписку')}</button></div>`:''}</div>`).join('')||'<p>'+tr('Подключений пока нет. Задачи будут ждать пул.')+'</p>';
     const manageable=m=>[currentUser.project_ids,currentUser.token_projects].every(scope=>!scope.length||(m.project_ids.length&&m.project_ids.every(id=>scope.includes(id))));
     $('#members').innerHTML=members.map(m=>`<div class="setting-row"><strong>${esc(m.name)}</strong><small>${esc(m.role)} · ${m.enabled?tr('активен'):tr('отключён')} · ${m.project_ids.length?tr('проектов: {n}',{n:m.project_ids.length}):tr('все проекты')}</small>${manageable(m)?`<div class="setting-actions"><button class="quiet" data-edit-member="${m.id}">${tr('Изменить доступ →')}</button>${m.id!==currentUser.id?`<button class="quiet" data-reissue-member="${m.id}">${tr('Перевыпустить токен')}</button>`:''}</div>`:''}</div>`).join('');
     document.querySelectorAll('[data-edit-connection]').forEach(b=>b.onclick=()=>connectionForm(connections.find(c=>c.id===b.dataset.editConnection)));
     document.querySelectorAll('[data-reconnect]').forEach(b=>b.onclick=()=>reconnectForm(connections.find(c=>c.id===b.dataset.reconnect)));
+    document.querySelectorAll('[data-delete-connection]').forEach(b=>b.onclick=()=>deleteConnection(connections.find(c=>c.id===b.dataset.deleteConnection)));
     document.querySelectorAll('[data-recheck]').forEach(b=>b.onclick=async()=>{await api('/connections/'+b.dataset.recheck+'/recheck','POST');toast(tr('Квота будет проверена при следующем запуске'));settings();});
     document.querySelectorAll('[data-edit-member]').forEach(b=>b.onclick=()=>memberForm(members.find(m=>m.id===b.dataset.editMember)));
     document.querySelectorAll('[data-reissue-member]').forEach(b=>b.onclick=async()=>{const m=members.find(m=>m.id===b.dataset.reissueMember);if(!confirm(tr('Прежние токены {name} перестанут работать. Продолжить?',{name:m.name})))return;const result=await api('/members/'+m.id+'/token','POST');showToken(tr('Новый токен {name}',{name:m.name}),result.token);});
