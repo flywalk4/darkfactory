@@ -60,6 +60,7 @@ def max_new_files():
 
 
 STALE_LOCK_SECONDS = 120
+COMMIT_TITLE_CHARS = 100
 
 
 class GitError(RuntimeError):
@@ -296,14 +297,24 @@ class Repository:
             )
         return None
 
-    def commit(self):
+    def commit(self, title=None):
+        """Commit the work under the writer's own title for it; the task title only names the task.
+
+        A pending merge is committed first, as a merge of the resolved files only: task changes made in the
+        same run go into their own commit, so the merge does not carry them under its title."""
         self.exclude_caches()
+        if self._pending_merge():
+            conflicted = self.git("diff", "--name-only", "--diff-filter=U", "-z", cwd=self.work, check=False)
+            paths = [path for path in conflicted.stdout.split("\0") if path]
+            if paths:
+                self.git("add", "--", *paths, cwd=self.work)
+            message = f"Merge {self.project.target} into {self.task.branch}"
+            self.git("commit", "-m", message, cwd=self.work)
         self.git("add", "-A", cwd=self.work)
-        if (
-            self.git("diff", "--cached", "--quiet", cwd=self.work, check=False).returncode
-            or self._pending_merge()
-        ):
-            self.git("commit", "-m", f"factory: {self.task.title}", cwd=self.work)
+        if self.git("diff", "--cached", "--quiet", cwd=self.work, check=False).returncode:
+            title = " ".join(str(title or "").split())[:COMMIT_TITLE_CHARS].strip()
+            message = f"{title}\n\nfactory: {self.task.title}" if title else f"factory: {self.task.title}"
+            self.git("commit", "-m", message, cwd=self.work)
         return self.head()
 
     def _added(self):

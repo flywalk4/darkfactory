@@ -951,3 +951,24 @@ def test_jvm_tools_get_the_task_proxy(tmp_path, monkeypatch):
     (tmp_path / ".m2" / "settings.xml").write_text("<settings/>")
     runner.jvm_proxy("http://127.0.0.1:40124", str(tmp_path))
     assert (tmp_path / ".m2" / "settings.xml").read_text() == "<settings/>"
+
+
+def test_writer_names_its_own_commit(tmp_path):
+    import json
+
+    from darkfactory import execution, worker
+
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    assert execution.handoff_commit(evidence) is None
+    (evidence / "handoff.json").write_text(json.dumps({"commit": " Sort the list\n by date ", "intent": "x"}))
+    assert execution.handoff_commit(evidence) == "Sort the list by date"
+    assert worker.commit_title({"commit_title": "Sort the list by date", "text": "Готово"}) == (
+        "Sort the list by date"
+    )
+    # Without one, the final comment says what changed; factory notes and [LATER] lines never do.
+    assert worker.commit_title({"text": "\nСписок сортируется по дате.\nПроверено тестами."}) == (
+        "Список сортируется по дате."
+    )
+    assert worker.commit_title({"text": "[darkfactory] Вывод прогонов убран"}) is None
+    assert worker.commit_title({}) is None

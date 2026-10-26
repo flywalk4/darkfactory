@@ -216,13 +216,24 @@ def test_conflict_workfiles_survive_until_controller_commits_merge(
         # The trusted controller stages files; the agent only edits their content.
         second.git("add", "-A", cwd=second.work)
         assert second.git("diff", "--cached", "--quiet", cwd=second.work, check=False).returncode == 0
-    merged = second.commit()
+    merged = second.commit("Keep both values")
     assert merged != second_change
-    assert second.git("rev-list", "--parents", "-n", "1", merged, cwd=second.work).split() == [
-        merged,
+    # The merge carries only the resolved files; the draft is task work and gets its own commit.
+    merge = merged if resolve_with_ours else second.git("rev-parse", "HEAD~1", cwd=second.work)
+    assert second.git("rev-list", "--parents", "-n", "1", merge, cwd=second.work).split() == [
+        merge,
         second_change,
         first_change,
     ]
+    assert (
+        second.git("log", "-1", "--format=%s", merge, cwd=second.work)
+        == "Merge preprod into darkfactory/parallel-task"
+    )
+    if not resolve_with_ours:
+        assert second.git("diff", "--name-only", merge, merged, cwd=second.work) == "draft.txt"
+        assert second.git("log", "-1", "--format=%B", merged, cwd=second.work) == (
+            "Keep both values\n\nfactory: Test fix"
+        )
     assert not second._pending_merge()
     assert second.integrate() == (first_change, merged)
     assert second.git("diff", "--check", first_change, merged, cwd=second.work) == ""
@@ -508,3 +519,17 @@ def test_stale_index_lock_from_a_killed_git_is_removed(repository_factory, tmp_p
     repo.git("add", "a.txt", cwd=work)
     assert not lock.exists()
     assert "a.txt" in repo.git("diff", "--cached", "--name-only", cwd=work)
+
+
+def test_commit_title_comes_from_the_writer_and_the_task_title_from_the_body(publish_repository):
+    repo = publish_repository
+    (repo.work / "value.txt").write_text("changed\n")
+    sha = repo.commit("  Show the compact panel\nby default  ")
+    assert repo.git("log", "-1", "--format=%B", sha, cwd=repo.work) == (
+        "Show the compact panel by default\n\nfactory: Test fix"
+    )
+    (repo.work / "value.txt").write_text("again\n")
+    sha = repo.commit()
+    assert repo.git("log", "-1", "--format=%B", sha, cwd=repo.work) == "factory: Test fix"
+    # Nothing staged: no empty commit.
+    assert repo.commit("Nothing") == sha

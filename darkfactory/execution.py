@@ -327,6 +327,18 @@ def handoff_summary(evidence):
     return "\n".join(lines)[:HANDOFF_CHARS] or None
 
 
+def handoff_commit(evidence):
+    """The commit title the writer gave in handoff.json, or None."""
+    try:
+        value = json.loads(read_evidence(evidence, HANDOFF_FILE, 65536) or "")
+    except ValueError:
+        return None
+    title = value.get("commit") if isinstance(value, dict) else None
+    if not isinstance(title, str):
+        return None
+    return " ".join(title.split())[:200] or None
+
+
 def owner_request(evidence, split_allowed):
     """A writer may stop to ask the owner a blocking question or to split work too large for one run."""
     try:
@@ -1037,6 +1049,8 @@ class DockerExecutor:
             if role == "implement" and (summary := handoff_summary(evidence)):
                 result["handoff"] = summary
                 result["handoff_files"] = handoff_files(evidence)
+            if role == "implement" and (title := handoff_commit(evidence)):
+                result["commit_title"] = title
             return result
         finally:
             if container:
@@ -1177,7 +1191,9 @@ def writer_rules(setup, split):
         "- Logs, screenshots, traces and test reports go to $DARKFACTORY_EVIDENCE_DIR, never into the "
         "repository.",
         "- Before finishing, write $DARKFACTORY_EVIDENCE_DIR/" + HANDOFF_FILE + ': {"intent":"...",'
-        '"files":["path: what changed"],"decisions":["..."],"unverified":["..."],"commands_run":["..."]}.',
+        '"commit":"...","files":["path: what changed"],"decisions":["..."],"unverified":["..."],'
+        '"commands_run":["..."]}. "commit" is the commit title: one line on what this change does, not the '
+        "task title; it must match the diff.",
         "Finish with a short comment in Russian, one or two sentences: what changed and what you verified, "
         "no raw logs or secrets. The factory sends it with the accepted commit.",
     ]

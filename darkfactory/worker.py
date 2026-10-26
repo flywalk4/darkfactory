@@ -176,6 +176,14 @@ def unbacked_claims(repo, claimed):
     )
 
 
+def commit_title(result):
+    """The writer's title for its commit: handoff.json "commit", else its final comment's first line."""
+    if result.get("commit_title"):
+        return result["commit_title"]
+    lines = [line for line in (result.get("text") or "").splitlines() if line.strip()]
+    return lines[0] if lines and not lines[0].lstrip().startswith(("[darkfactory]", LATER_PREFIX)) else None
+
+
 def deferred_lines(text):
     """[LATER] lines a writer left in its final comment."""
     return [
@@ -1121,7 +1129,7 @@ class Worker:
                         if junk := repo.junk():
                             result = {"status": "checks_failed", "text": junk}
                         else:
-                            result["sha"] = repo.commit()
+                            result["sha"] = repo.commit(commit_title(result))
                             if task.target_sha:
                                 # Review now runs before integration: without this it read the diff of
                                 # the last integration and rejected fixes it could not see.
