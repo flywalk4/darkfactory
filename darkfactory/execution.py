@@ -18,6 +18,7 @@ from sqlalchemy import select
 from . import agents, attachments, environment, initialization, jira, logs, mirrors, toolchains
 from .db import ROOT, Event, Link, Pool, Session, Task, decrypt, event, transaction, uid
 from .egress import PACKAGE_REGISTRIES, TELEMETRY_SUFFIXES, egress_proxy
+from .privileges import MCP_UID
 
 log = logging.getLogger(__name__)
 
@@ -586,8 +587,10 @@ class DockerExecutor:
         evidence = artifacts / "browser" / generation
         evidence.mkdir(parents=True, mode=0o755)
         try:
-            # Writable for the agent's uid only; the worker reads and writes it without following links.
-            os.chown(evidence, 1000, 1000)
+            # Writable for the agent's uid and the MCP servers' group (the browser MCP saves screenshots here);
+            # the worker reads and writes it without following links.
+            os.chown(evidence, 1000, MCP_UID)
+            evidence.chmod(0o2775)
         except PermissionError:
             evidence.chmod(0o777)
         attachments.directory(task.id).mkdir(parents=True, exist_ok=True)
