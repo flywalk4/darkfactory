@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 MAX_ITEMS = 60
 MAX_GROUPS = 12
 INTERVAL_HOURS = 4
+KEEP_SECONDS = 86400
 
 
 class BacklogItem(Base):

@@ -123,3 +123,39 @@ def test_later_notes_stay_on_the_task_instead_of_the_backlog(client, setup_proje
             select(db.Event).where(db.Event.task_id == owner.id, db.Event.kind == "later_notes")
         )
         assert notes.data["items"] == ["Реальное улучшение"]
+
+
+def test_finished_notes_leave_the_backlog_after_a_day(client, setup_project, monkeypatch):
+    from darkfactory.routes import backlog as routes
+
+    project, pool = setup_project
+    connect(client, pool)
+    texts = ["Открытая", "Задача в работе", "Задача принята", "Отброшена", "Задача удалена"]
+    ids = [add(client, project, text) for text in texts]
+    with db.transaction() as session:
+        for state in ("running", "merged"):
+            session.add(
+                db.Task(
+                    id=state,
+                    org_id=project["org_id"],
+                    project_id=project["id"],
+                    title=state,
+                    request="r",
+                    branch="b",
+                    state=state,
+                    updated=1000,
+                )
+            )
+        session.flush()
+        changes = [("planned", "running"), ("planned", "merged"), ("dismissed", None), ("planned", "gone")]
+        for ident, (state, task) in zip(ids[1:], changes):
+            note = session.get(backlog.BacklogItem, ident)
+            note.state, note.task_id, note.planned = state, task, 1000
+
+    def shown():
+        return {item["text"] for item in client.get(f"/api/projects/{project['id']}/backlog").json()["items"]}
+
+    monkeypatch.setattr(routes, "now", lambda: 1000 + backlog.KEEP_SECONDS - 1)
+    assert shown() == set(texts)
+    monkeypatch.setattr(routes, "now", lambda: 1000 + backlog.KEEP_SECONDS + 1)
+    assert shown() == {"Открытая", "Задача в работе"}

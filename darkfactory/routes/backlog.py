@@ -2,14 +2,16 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from .. import (
     backlog,
+    cleanup,
 )
 from ..db import (
     Session,
     Task,
+    now,
     transaction,
 )
 from ..web import access
@@ -22,15 +24,24 @@ class BacklogInput(BaseModel):
 
 
 def backlog_view(db, project):
-    items = db.scalars(
-        select(backlog.BacklogItem)
-        .where(backlog.BacklogItem.project_id == project.id)
-        .order_by(backlog.BacklogItem.created.desc())
+    note = backlog.BacklogItem
+    # Notes stay a day after their task finishes or the agent drops them; the board keeps the history.
+    # Every branch is false, never NULL, for open notes without a task, so the negation keeps them.
+    cutoff = now() - backlog.KEEP_SECONDS
+    gone = or_(
+        and_(note.state == "dismissed", note.planned < cutoff),
+        and_(note.state == "planned", Task.id.is_(None), note.planned < cutoff),
+        and_(Task.id.is_not(None), Task.state.in_(cleanup.FINISHED), Task.updated < cutoff),
+    )
+    pairs = db.execute(
+        select(note, Task)
+        .outerjoin(Task, Task.id == note.task_id)
+        .where(note.project_id == project.id, ~gone)
+        .order_by(note.created.desc())
         .limit(200)
     )
     rows = []
-    for item in items:
-        task = db.get(Task, item.task_id) if item.task_id else None
+    for item, task in pairs:
         rows.append(
             {
                 "id": item.id,
