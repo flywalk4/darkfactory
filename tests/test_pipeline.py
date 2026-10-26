@@ -168,7 +168,11 @@ def test_no_checks_merges_approved_review_into_preprod_by_default(client, setup_
     # Main stays a human decision: the board flags the task until the owner merges or rejects it.
     listed = {t["id"]: t for t in client.get(f"/api/projects/{project['id']}/tasks").json()}
     assert listed[task["id"]]["promotion_pending"] is True
-    proposal = client.get(f"/api/tasks/{task['id']}").json()["promotion"]
+    detail = client.get(f"/api/tasks/{task['id']}").json()
+    proposal = detail["promotion"]
+    # The writer's final answer is the task's result on its page, and a file the owner can open.
+    assert detail["report"] == "Fixed value"
+    assert client.get(f"/api/tasks/{task['id']}/artifacts/report.md").text == "Fixed value"
     # Without required checks the owner can still review the main diff.
     assert client.get(f"/api/tasks/{task['id']}/promotion").status_code == 200
     rejected = client.post(

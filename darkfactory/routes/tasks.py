@@ -312,6 +312,18 @@ def event_page(db, task_id, before=None, limit=EVENT_PAGE):
     return [public(e) for e in reversed(rows[:limit])], more
 
 
+REPORT_LIMIT = 40_000
+
+
+def task_report(task_id):
+    """The writer's final answer from its last committed run, bounded for the task page; None before one."""
+    try:
+        text = (ROOT / "artifacts" / task_id / "report.md").read_text(errors="replace")
+    except OSError:
+        return None
+    return text[:REPORT_LIMIT] + "\n…" if len(text) > REPORT_LIMIT else text
+
+
 @router.get("/api/tasks/{task_id}")
 def task_detail(task_id: str, a=Depends(access)):
     with Session() as db:
@@ -325,6 +337,7 @@ def task_detail(task_id: str, a=Depends(access)):
             "waiting_for": waiting_for(task, held_files(db, [task.id]).get(task.id)),
             "usage": task_usage(task_id),
             "attachments": attachments.listing(task_id),
+            "report": task_report(task_id),
             "events": events,
             "events_more": more,
             "event_count": db.scalar(select(func.count()).select_from(Event).where(Event.task_id == task_id)),
@@ -431,6 +444,7 @@ def artifact(task_id: str, name: str, a=Depends(access)):
         "checks.txt",
         "handoff.md",
         "plan.md",
+        "report.md",
         "repository-index.md",
     }:
         raise HTTPException(404)

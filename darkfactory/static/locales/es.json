@@ -929,5 +929,6 @@
  "файлов: {n}": "archivos: {n}",
  "через {h} ч": "en {h} h",
  "● Что агент делает сейчас": "● Qué hace el agente ahora",
- "⚠ Нет активности агента {n} мин": "⚠ Sin actividad del agente desde hace {n} min"
+ "⚠ Нет активности агента {n} мин": "⚠ Sin actividad del agente desde hace {n} min",
+ "Результат": "Resultado"
 }

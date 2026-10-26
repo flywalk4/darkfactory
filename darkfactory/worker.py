@@ -1147,6 +1147,9 @@ class Worker:
                                         "handoff": result.get("handoff"),
                                     }
                         write_handoff(task, result.get("text", ""), result.get("handoff"))
+                        if result.get("sha"):
+                            # The writer's whole final answer: for a research task it is the result itself.
+                            (repo.artifacts / "report.md").write_text(result.get("text", ""))
                 if phase == "review":
                     (repo.artifacts / "review.txt").write_text(result.get("text", ""))
                     if result.get("review"):
