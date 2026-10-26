@@ -811,6 +811,9 @@ def scoped(commands, scopes=None, base=None, root="/workspace"):
 
 def run_checks(commands, scopes=None, base=None):
     """Run required checks in order, stopping at the first failure."""
+    # The task's base commit, for checks that look only at the change (scripts/leak_check.py).
+    if base:
+        os.environ["DARKFACTORY_CHECK_BASE"] = base
     results = []
     for command in scoped(commands, scopes, base):
         note("tool", "$ " + command)

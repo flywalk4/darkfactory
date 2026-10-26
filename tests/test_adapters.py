@@ -808,7 +808,7 @@ def test_loopback_certificate_is_a_server_certificate_signed_by_a_separate_ca():
     assert [str(ip) for ip in san.get_values_for_type(x509.IPAddress)] == ["127.0.0.1"]
     usage = cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
     assert list(usage) == [ExtendedKeyUsageOID.SERVER_AUTH]
-    assert key_pem.startswith(b"-----BEGIN PRIVATE KEY-----")
+    assert key_pem.startswith(b"-----BEGIN PRIVATE KEY-----")  # leak-check: allow
 
 
 def test_credential_relay_serves_https_trusted_through_its_ca(monkeypatch, tmp_path):

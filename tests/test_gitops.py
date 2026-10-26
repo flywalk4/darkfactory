@@ -36,7 +36,7 @@ def test_ssh_credentials_are_private_and_strict(repository_factory, monkeypatch)
     monkeypatch.setenv("SSH_AUTH_SOCK", "/host/ssh-agent.sock")
     monkeypatch.setenv("SSH_AGENT_PID", "123")
     monkeypatch.setenv("SSH_ASKPASS", "/host/askpass")
-    key = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-key-material\n-----END OPENSSH PRIVATE KEY-----"
+    key = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-key-material\n-----END OPENSSH PRIVATE KEY-----"  # leak-check: allow
     hosts = "git.example.org ssh-ed25519 AAAAexample"
     repo = repository_factory({"ssh_private_key": key, "ssh_known_hosts": hosts})
     args = shlex.split(repo.env["GIT_SSH_COMMAND"])
@@ -88,7 +88,7 @@ def test_without_ssh_key_never_uses_host_identity(repository_factory):
 
 def test_git_error_redacts_multiline_secrets_before_truncation(repository_factory, monkeypatch):
     secret_line = "private" * 1000
-    key = "-----BEGIN PRIVATE KEY-----\n" + secret_line + "\n-----END PRIVATE KEY-----"
+    key = "-----BEGIN PRIVATE KEY-----\n" + secret_line + "\n-----END PRIVATE KEY-----"  # leak-check: allow
     token = "secret-http-token"
     repo = repository_factory(
         {"ssh_private_key": key, "ssh_known_hosts": "git.example.org ssh-ed25519 AAAA", "git_token": token}
