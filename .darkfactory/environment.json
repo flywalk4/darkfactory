@@ -1,0 +1,17 @@
+{
+  "toolchains": {},
+  "apt": [],
+  "feeds": [],
+  "setup": [
+    "python3 -m venv .venv",
+    ".venv/bin/pip install --disable-pip-version-check --quiet -e '.[dev]'"
+  ],
+  "checks": [
+    "python3 scripts/leak_check.py",
+    ".venv/bin/ruff check darkfactory tests scripts",
+    ".venv/bin/ruff format --check darkfactory tests scripts",
+    ".venv/bin/python -m pytest -q -p no:cacheprovider",
+    "for f in darkfactory/static/*.js; do node --check \"$f\" || exit 1; done",
+    "python3 scripts/i18n_check.py"
+  ]
+}

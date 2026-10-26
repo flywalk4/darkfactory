@@ -169,7 +169,7 @@ If your personal Codex already works through a local subscription gateway, pass 
 python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
 ```
 
-This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
+This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. A Claude connection takes the same kind of gateway in its credentials (`"base_url": "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"` for agent-stack's bili and headroom); its relay then forwards there instead of to the provider. On Linux a gateway that listens on loopback only is exposed to the containers by `scripts/systemd/darkfactory-gateway.service` (socat on the Docker bridge address); the agent-stack services must survive logout (`loginctl enable-linger`). The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
 
 ### Pools and engine selection
 
@@ -519,6 +519,17 @@ Each defect the agent reproduced twice becomes an ordinary fix task with the ste
 
 Notifications: `qa_reported` and `qa_not_fixed`. API: `POST /api/projects/{id}/qa` starts a run now. The run uses the project's writer pool and lasts at most `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` turns stand testing off for the whole installation.
 
+### Stand builds
+
+For a platform that builds apps itself (a low-code platform with an assistant in its editor), a **"Build an app on the stand"** [schedule](#schedules) makes the tester a demanding customer. Each run takes the next request from the project's **"Build requests"** (`build_tasks`, one per line; empty = the factory's own set: leave requests, support tickets, doctor appointments, a shop with orders, an employee survey) and:
+
+1. signs in to the tester's own tenant and gives the request to the platform's builder word for word, following the owner's **"How to build an app on this platform"** (`build_instructions`);
+2. waits for the result, publishes or previews the app and uses it end to end in every role, at 390 and 1440 px;
+3. scores completeness, correctness, usability and visual quality 0–5 and records whether it built, how long it took, compile errors and failing tests;
+4. turns at most `build_max_tasks` problems (3 by default) into fix tasks of the platform project, each with the category of its root cause: `dsl`, `compiler`, `builder`, `components`, `studio`, `runtime` or `other`. A task asks to fix the platform, not the one generated app.
+
+The schedule row shows the last build and the share built and mean scores over the last ten runs; the last 60 runs are kept for week-by-week comparison. Builds and stand tests share one browser slot. `DARKFACTORY_BUILD_SECONDS` (3000) bounds a run.
+
 ### GitLab deploys
 
 For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in the `main` pipeline (for example `deploy`). A project with GitLab MRs uses the MR server and its token; a project without them uses the API beside its HTTPS Git URL (`https://host/api/v4`) and the Git token, so it keeps working without MRs. The token needs the `api` scope and the right to run that job, including a protected environment. After the owner merges into `main` (see [Promoting to main](#promoting-to-main)), the factory:
@@ -538,6 +549,7 @@ The **"Schedules"** page of a project lists its recurring jobs. Each schedule ha
 | Job | What a run does |
 |---|---|
 | Stand testing | asks the [stand tester](#stand-tester) for a run; skipped while 8 stand bugs are open |
+| Build an app on the stand | asks the tester for a [stand build](#stand-builds) |
 | Backlog into tasks | groups the open backlog notes into tasks; nothing happens without new notes |
 | Merge main into preprod | [syncs `main` into `preprod`](#syncing-main-back-into-preprod) |
 | Project lessons | turns the collected [lessons](#project-lessons) into one task "Update project rules"; nothing happens without new cases, skipped while that task is open |

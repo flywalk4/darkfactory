@@ -97,6 +97,11 @@ fi
 echo "$(date -Is) update $current -> $target" >>"$LOG"
 status updating "$target" "$current" "Building and starting the new version"
 touch "$SYSTEM/hold"
+# New work is held; let running agent steps finish so a restart does not cut them off mid-run.
+idle_until=$(($(date +%s) + ${DARKFACTORY_UPDATE_IDLE_WAIT:-2400}))
+while [ -n "$(docker ps -q --filter name=df-task-)" ] && [ "$(date +%s)" -lt "$idle_until" ]; do
+    sleep 20
+done
 started=$(date +%s)
 git merge -q --ff-only "$target"
 if ! build; then

@@ -169,7 +169,7 @@ Compose 的设置从 `.env` 读取：
 python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
 ```
 
-此模式只接受本地 HTTP 地址，并且需要 `DARKFACTORY_PERSONAL_MODE=1`。执行器通过固定隧道和现有的地址白名单连接到指定网关；容器网络保持为 `none`。此模式不会启用付费 API。
+此模式只接受本地 HTTP 地址，并且需要 `DARKFACTORY_PERSONAL_MODE=1`。Claude 连接的凭据中同样可以指定这样的网关（agent-stack 的 bili 和 headroom 使用 `"base_url": "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"`）；其中继随后会转发到该网关，而不是转发到提供方。在 Linux 上，只监听回环地址的网关由 `scripts/systemd/darkfactory-gateway.service` 暴露给容器（socat 监听 Docker 网桥地址）；agent-stack 服务必须能在注销后继续运行（`loginctl enable-linger`）。执行器通过固定隧道和现有的地址白名单连接到指定网关；容器网络保持为 `none`。此模式不会启用付费 API。
 
 ### 池与引擎选择
 
@@ -424,7 +424,21 @@ incoming webhook 有两种工作模式，由其“Override Destination Channel�
 顶层任务完成时，通知中还会包含一个 **“合并到 main / 拒绝”** 链接。这是工厂内部的合并提案，本地 Git 同样适用。它会固定已接受的提交，并显示与当前 `main` 的完整 diff（最多 100,000 个字符，带截断标记）。Owner 可以合并或拒绝；GET 链接本身不会改变任何内容。传输范围包括直到指定提交为止的所有 `preprod` 变更，包括子任务。拒绝会保持 `preprod` 不变。
 
 > [!NOTE]
-> 没有自动转入 `main` 的流程，也没有部署；Director 无法做出这个决定。配置了部署任务的 GitLab 项目会在所有者合并后部署（[见下文](#测试环境与-gitlab-部署)）。如果 `main` 已偏离已接受的提交，则需要先进行集成和重新检查。旧的已完成任务不会自动获得新的提案。
+> 默认情况下没有自动转入 `main` 的流程，Director 也无法做出这个决定；可选的自动推进见 [自动推进](#自动推进)。配置了部署任务的 GitLab 项目会在所有者合并后部署（[见下文](#测试环境与-gitlab-部署)）。如果 `main` 已偏离已接受的提交，则需要先进行集成和重新检查。旧的已完成任务不会自动获得新的提案。
+
+### 自动推进
+
+项目所有者可以让项目自行推进：设置 **“观察期后自动合并 preprod 到 main，单位：小时”**（`auto_promote_hours`，`0` = 只能手动），并添加一个 **“自动合并 preprod 到 main”** [计划](#计划任务)。计划触发时，最新的已接受 `preprod` 只有在以下条件全部满足时才会合并到 `main`：
+
+- 它至少在 `auto_promote_hours` 小时之前被接受，并且此后没有发生 preprod 事件；
+- 最近一次 preprod 检查正常，且通常的推进保护条件通过；
+- [泄露检查](#泄露检查) 在 `main..preprod` 的 diff 及其提交信息中没有发现任何问题。
+
+推进会作为工厂对该任务的决定被记录下来；如果配置了 GitLab 部署任务，随后会执行部署。计划行会显示某次运行没有推进的原因。
+
+### 泄露检查
+
+`scripts/leak_check.py` 面向位于公开仓库中的项目。作为必需检查，它会拒绝这样的变更：在新增行、提交信息或文件名中加入凭据（GitLab、GitHub、OpenAI/Anthropic、Slack 和 AWS 密钥、私钥、JWT、bearer 令牌、URL 或赋值中的密码），或加入所有者自己的模式。所有者的模式（内部域名、地址、登录名）写入项目的测试变量 `TEST_LEAK_PATTERNS`，每行一个或用 `;` 分隔；它们永远不会进入仓库。工厂把任务的基础提交作为 `DARKFACTORY_CHECK_BASE` 传给检查。输出只指出规则和行，从不显示具体的值。有意保留的示例可在其所在行加上标记 `leak-check: allow`。
 
 ### 将 main 同步回 preprod
 
@@ -505,6 +519,17 @@ docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < 
 
 通知：`qa_reported` 和 `qa_not_fixed`。API：`POST /api/projects/{id}/qa` 立即启动一次运行。运行使用项目的写入者池，最长持续 `DARKFACTORY_QA_SECONDS`（1800）；`DARKFACTORY_STAND_QA=0` 会在整个安装中关闭环境测试。
 
+### 环境构建
+
+对于自行构建应用的平台（编辑器中带有助手的低代码平台），一个 **“在环境中构建应用”** [计划](#计划任务)会让测试人员扮演一个苛刻的客户。每次运行都会从项目的 **“在环境中构建的需求”**（`build_tasks`，每行一条；为空 = 工厂自带的一组需求：请假申请、支持工单、预约看诊、带订单的商店、员工调查）中取出下一条需求，然后：
+
+1. 登录测试人员自己的租户，将需求原样交给平台的构建器，并遵循所有者在 **“如何在此平台上构建应用”**（`build_instructions`）中的说明；
+2. 等待结果，发布或预览应用，并在每个角色中以 390 和 1440 px 两种宽度端到端地使用它；
+3. 以 0–5 分为完整性、正确性、可用性和视觉质量打分，并记录是否构建成功、耗时、编译错误和失败的测试；
+4. 将至多 `build_max_tasks` 个问题（默认 3 个）转为平台项目的修复任务，每个任务附带其根本原因的类别：`dsl`、`compiler`、`builder`、`components`、`studio`、`runtime` 或 `other`。任务要求修复平台本身，而不是某一个生成的应用。
+
+计划行会显示最近一次构建，以及最近十次运行中已构建的比例和平均分；最近 60 次运行会被保留，用于按周比较。构建与环境测试共用一个浏览器槽位。`DARKFACTORY_BUILD_SECONDS`（3000）限制一次运行的时长。
+
 ### GitLab 部署
 
 对于 GitLab 项目，在 **"GitLab 部署任务"** 中填写 `main` 流水线中一个手动任务的名称（例如 `deploy`）。使用 GitLab MR 的项目采用 MR 服务器及其令牌；不使用 MR 的项目采用 HTTPS Git 地址旁的 API（`https://host/api/v4`）和 Git 令牌，因此没有 MR 也能继续工作。令牌需要 `api` 权限范围以及运行该任务的权限，包括受保护的环境。所有者合并到 `main` 之后（见[推进到 main](#推进到-main)），工厂会：
@@ -524,6 +549,7 @@ docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < 
 | 作业 | 每次运行执行的操作 |
 |---|---|
 | 环境测试 | 向 [测试人员](#测试人员) 请求一次运行；有 8 个环境缺陷未关闭时跳过 |
+| 在环境中构建应用 | 向测试人员请求一次 [环境构建](#环境构建) |
 | 待办转任务 | 将未处理的待办笔记归入任务；没有新笔记时不做任何事 |
 | 将 main 合并到 preprod | [将 `main` 同步到 `preprod`](#将-main-同步回-preprod) |
 | 任务 | 按保存的标题、请求和优先级创建一个普通任务；上一次运行的任务仍未关闭时跳过 |
@@ -559,6 +585,25 @@ API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, 
 ### 更新
 
 使用 `docker compose up -d --build` 更新。为了让任务不必等待旧 worker 完成当前步骤，请通过 `scripts/deploy-worker.sh` 更新 worker：新 worker 立即接手工作，旧 worker 完成已开始的工作后停止。当前的迁移会添加缺失的列并保留现有数据。回滚时，请恢复之前的代码/镜像并重启服务；已添加的列可以保留。常规更新时不要删除卷。
+
+### 自我更新
+
+服务器可以自行跟踪 `origin/main`。`scripts/self-update.sh` 从主机上的 systemd timer 运行，在容器之外，因此有问题的版本仍然可以被回滚：
+
+1. 拉取 `origin/main`；没有新内容，或该提交已经失败过：停止；
+2. 暂停接收新工作（`/data/system/hold`），快进检出，重建应用和执行器，通过 `scripts/deploy-worker.sh` 重启应用并启动新的 worker；
+3. 最多等待 10 分钟，直到应用连续两分钟正常响应、调度器（`/data/system/worker-heartbeat`）持续跳动，并且没有 `Scheduler tick failed`；
+4. 否则回到上一个提交，重建并重启，同时记住这个坏提交，直到出现更新的提交。
+
+本地修改或被改写的 `main` 会使更新以错误停止，而不会被覆盖。结果保存在 `/data/system/self-update.json` 和工厂页面上；日志是 `/data/system/self-update.log`。安装：
+
+```sh
+cp scripts/systemd/darkfactory-update.* /etc/systemd/system/
+# set WorkingDirectory in darkfactory-update.service to this checkout
+systemctl daemon-reload && systemctl enable --now darkfactory-update.timer
+```
+
+与[自动推进](#自动推进)一起，开发自身仓库的工厂可以把已接受的变更交付给自己。
 
 ## 界面语言
 

@@ -20,9 +20,10 @@ from .db import Base, Project, Task, decrypt, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
-KINDS = ("stand_qa", "backlog", "main_sync", "auto_promote", "lessons", "task")
+KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "lessons", "task")
 TITLES = {
     "stand_qa": "Тестирование стенда",
+    "stand_build": "Сборка приложения на стенде",
     "backlog": "Бэклог в задачи",
     "main_sync": "Влить main в preprod",
     "auto_promote": "Автоперенос preprod в main",
@@ -33,6 +34,7 @@ CLOSED = {"merged", "cancelled", "duplicate", "checked"}
 # A job handed over to its own worker loop: its progress shows in `jobs`, not in this text.
 QUEUED = {
     "stand_qa": "Тестирование стенда поставлено в очередь",
+    "stand_build": "Сборка приложения на стенде поставлена в очередь",
     "backlog": "Бэклог поставлен в очередь",
     "main_sync": "Синхронизация main поставлена в очередь",
     "auto_promote": "Проверка автопереноса в main поставлена в очередь",
@@ -213,6 +215,12 @@ def fire(db, schedule):
             return f"Пропущено: открыто {standqa.MAX_OPEN}+ дефектов стенда"
         standqa.request(db, project, "schedule")
         return QUEUED["stand_qa"]
+    if schedule.kind == "stand_build":
+        from . import standbuild
+
+        if not standbuild.request(db, project, "schedule"):
+            return "Адрес стенда не задан"
+        return QUEUED["stand_build"]
     if schedule.kind == "backlog":
         if not db.scalar(
             select(backlog.BacklogItem.id).where(
@@ -311,6 +319,7 @@ def jobs(db, project):
             "found": qa.get("tasks"),
             "tasks": [{"id": task.id, "title": task.title, "state": task.state} for task in tasks if task],
         },
+        "stand_build": build_job(project),
         "backlog": {
             "requested": grouping.get("requested"),
             "at": grouping.get("at"),
@@ -328,6 +337,24 @@ def jobs(db, project):
             "state": (health.get("main_sync") or {}).get("state"),
             "error": (health.get("main_sync") or {}).get("error"),
         },
+    }
+
+
+def build_job(project):
+    from . import standbuild
+
+    current = standbuild.state(project)
+    history = current.get("history") or []
+    last = history[-1] if history else None
+    return {
+        "running": current.get("running"),
+        "requested": current.get("requested"),
+        "at": current.get("at"),
+        "error": current.get("error"),
+        "task": current.get("task") if current.get("running") else (last or {}).get("task"),
+        "last": last,
+        "average": standbuild.summary(history),
+        "found": current.get("tasks"),
     }
 
 
