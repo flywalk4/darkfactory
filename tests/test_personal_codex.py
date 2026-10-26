@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from fastapi import HTTPException
@@ -88,8 +89,14 @@ def test_personal_runner_uses_native_account_login_without_api_credentials(monke
         "chatgptAccountId": "personal-account",
     }
     assert "real-signature" not in process.stdin.getvalue() and "real-signature" not in json.dumps(calls)
-    assert any(arg.startswith('chatgpt_base_url="http://127.0.0.1:') for arg in calls[0][0])
     args, options = calls[0]
+    # Codex accepts the ChatGPT backend only over HTTPS, signed by a CA it alone trusts.
+    backend = next(arg for arg in args if arg.startswith("chatgpt_base_url="))
+    assert backend.startswith('chatgpt_base_url="https://127.0.0.1:') and backend.endswith('/backend-api/"')
+    ca = options["env"]["CODEX_CA_CERTIFICATE"]
+    assert ca == "/tmp/codex/relay-ca.pem"
+    assert open(ca).read().startswith("-----BEGIN CERTIFICATE-----")
+    assert oct(os.stat(ca).st_mode & 0o777) == "0o644"
     assert not any("openai_chatgpt_plan" in arg for arg in args)
     if gateway:
         assert 'model_provider="personal_gateway"' in args
@@ -102,6 +109,9 @@ def test_personal_runner_uses_native_account_login_without_api_credentials(monke
         assert "model_providers.personal_gateway.requires_openai_auth=true" in args
     else:
         assert 'model_provider="openai"' in args
+        # Model requests from a ChatGPT login go through the same relay, not straight to chatgpt.com.
+        relayed = backend[len('chatgpt_base_url="') : -len('/backend-api/"')]
+        assert "openai_base_url=" + json.dumps(relayed + "/backend-api/codex") in args
     assert not any(arg.startswith("model_providers.openai.") for arg in args)
     assert "ACCESS_TOKEN" not in options["env"]
     assert "OPENAI_API_KEY" not in options["env"]

@@ -15,7 +15,7 @@ COPY darkfactory ./darkfactory
 CMD ["uvicorn", "darkfactory.api:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM node:22-slim AS cli
-ARG CODEX_VERSION=0.134.0
+ARG CODEX_VERSION=0.162.1
 ARG CLAUDE_VERSION=2.1.304
 ARG PLAYWRIGHT_VERSION=1.64.1
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83

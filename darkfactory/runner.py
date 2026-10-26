@@ -30,7 +30,7 @@ from .egress import local_proxy, local_tunnel
 from .mcp_bridge import project_mcp
 from .privileges import as_user, hand_over
 from .relay import PLACEHOLDER as RELAY_PLACEHOLDER
-from .relay import auth_relay
+from .relay import auth_relay, loopback_certificate
 
 CHECKLIST = (
     "acceptance_met",
@@ -1106,7 +1106,14 @@ def codex(job, gateway_url=None):
             "Authorization": "Bearer " + credentials["accessToken"],
             "ChatGPT-Account-Id": credentials["chatgptAccountId"],
         }
-        backend = relay.enter_context(auth_relay(CHATGPT_ORIGIN, personal_headers))
+        # Codex reaches the ChatGPT backend only over HTTPS: the relay serves a certificate from a one-off
+        # CA that only this Codex trusts. The CA's key is dropped here; the server key never touches disk.
+        ca, cert, key = loopback_certificate()
+        ca_path = Path(env["CODEX_HOME"]) / "relay-ca.pem"
+        ca_path.write_bytes(ca)
+        ca_path.chmod(0o644)
+        env["CODEX_CA_CERTIFICATE"] = str(ca_path)
+        backend = relay.enter_context(auth_relay(CHATGPT_ORIGIN, personal_headers, tls=(cert, key)))
         args.extend(["-c", "chatgpt_base_url=" + json.dumps(backend + "/backend-api/")])
     if personal and gateway_url:
         split = urlsplit(gateway_url)
@@ -1122,8 +1129,10 @@ def codex(job, gateway_url=None):
         ):
             args.extend(["-c", config])
     elif personal:
-        # Native login uses the built-in provider; Codex forbids overriding its ID.
+        # Native login uses the built-in provider; Codex forbids overriding its ID. With a ChatGPT login it
+        # sends model requests straight to chatgpt.com, not to chatgpt_base_url, so they too go to the relay.
         args.extend(["-c", 'model_provider="openai"'])
+        args.extend(["-c", "openai_base_url=" + json.dumps(backend + "/backend-api/codex")])
     # Every turn re-sends the whole thread: cap tool output and compact before the context window fills.
     args.extend(
         ["-c", "tool_output_token_limit=" + str(int(os.getenv("DARKFACTORY_TOOL_OUTPUT_TOKENS", "1500")))]

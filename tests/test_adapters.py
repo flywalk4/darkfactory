@@ -791,6 +791,67 @@ def test_credential_relay_adds_the_token_and_streams_back(monkeypatch):
     assert seen == {"auth": "Bearer real", "body": b"{}"}
 
 
+def test_loopback_certificate_is_a_server_certificate_signed_by_a_separate_ca():
+    from cryptography import x509
+    from cryptography.x509.oid import ExtendedKeyUsageOID
+
+    from darkfactory.relay import loopback_certificate
+
+    ca_pem, cert_pem, key_pem = loopback_certificate()
+    ca, cert = x509.load_pem_x509_certificate(ca_pem), x509.load_pem_x509_certificate(cert_pem)
+    # rustls in Codex refuses a CA certificate as the server's own.
+    assert ca.extensions.get_extension_for_class(x509.BasicConstraints).value.ca is True
+    assert cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca is False
+    assert cert != ca and cert.issuer == ca.subject
+    cert.verify_directly_issued_by(ca)
+    san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert [str(ip) for ip in san.get_values_for_type(x509.IPAddress)] == ["127.0.0.1"]
+    usage = cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    assert list(usage) == [ExtendedKeyUsageOID.SERVER_AUTH]
+    assert key_pem.startswith(b"-----BEGIN PRIVATE KEY-----")
+
+
+def test_credential_relay_serves_https_trusted_through_its_ca(monkeypatch, tmp_path):
+    import http.server
+    import ssl
+    import threading
+
+    import httpx
+
+    from darkfactory.relay import auth_relay, loopback_certificate
+
+    seen = {}
+
+    class Upstream(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen["auth"] = self.headers.get("Authorization")
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *_):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    ca, cert, key = loopback_certificate()
+    (tmp_path / "ca.pem").write_bytes(ca)
+    trusted = ssl.create_default_context(cafile=str(tmp_path / "ca.pem"))
+    try:
+        upstream = f"http://127.0.0.1:{server.server_address[1]}"
+        with auth_relay(upstream, {"Authorization": "Bearer real"}, tls=(cert, key)) as base:
+            assert base.startswith("https://127.0.0.1:")
+            response = httpx.get(base + "/backend-api/codex/models", verify=trusted)
+            with pytest.raises(httpx.ConnectError):
+                httpx.get(base + "/backend-api/codex/models")
+    finally:
+        server.shutdown()
+    assert response.status_code == 200 and response.text == "ok"
+    assert seen == {"auth": "Bearer real"}
+
+
 def test_codex_writer_hands_over_at_the_step_cap(monkeypatch):
     monkeypatch.setenv("DARKFACTORY_CODEX_MAX_STEPS", "2")
     monkeypatch.setattr(runner, "workspace_changed", lambda root="/workspace": True)
