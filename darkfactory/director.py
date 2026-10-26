@@ -5,6 +5,7 @@ import base64
 import binascii
 import json
 import logging
+import os
 import re
 import time
 from types import SimpleNamespace
@@ -499,7 +500,8 @@ def advance_dialogues(executor=None):
         director_mcp = [server["name"] for server in (director_profile or {}).get("mcp_definitions", [])]
         project = SimpleNamespace(
             secret=encrypt(json.dumps({"agents": agents_config})) if agents_config else None,
-            writer="codex",
+            # A Director model set for Claude means the Director should run there first.
+            writer="claude" if os.getenv("DARKFACTORY_DIRECTOR_MODEL_CLAUDE") else "codex",
             reviewer="claude",
             checks=[],
             writer_pool=None,

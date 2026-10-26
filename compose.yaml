@@ -58,6 +58,9 @@ services:
       DARKFACTORY_NPM_MIRROR: ${NPM_MIRROR-http://npm-cache:4873/}
       DARKFACTORY_PYPI_MIRROR: ${PYPI_MIRROR-http://pypi-cache:5000/index/}
       PREPROD_CHECK_INTERVAL: ${PREPROD_CHECK_INTERVAL:-300}
+      # Director chat model per provider; empty keeps the connection's model.
+      DARKFACTORY_DIRECTOR_MODEL_CLAUDE: ${DARKFACTORY_DIRECTOR_MODEL_CLAUDE:-}
+      DARKFACTORY_DIRECTOR_MODEL_CODEX: ${DARKFACTORY_DIRECTOR_MODEL_CODEX:-}
     volumes:
       - data:/data
       - repos:/repos

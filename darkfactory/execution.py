@@ -834,6 +834,11 @@ class DockerExecutor:
                 job["quota_policy"] = dict(pool.policy or {}) if pool else {}
             if profile and profile["provider"] == connection.provider and profile.get("model"):
                 job["model"] = profile["model"]
+            elif role == "director" and (
+                model := os.getenv("DARKFACTORY_DIRECTOR_MODEL_" + connection.provider.upper())
+            ):
+                # A lighter model for the chat Director, while agents keep the subscription's own.
+                job["model"] = model
             elif connection.provider != "api" and (
                 agents.light(task)
                 or role == "locate"

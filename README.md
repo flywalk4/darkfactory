@@ -106,6 +106,7 @@ Compose settings are read from `.env`:
 | `DARKFACTORY_ADMIN_TOKEN` | Owner token chosen by you | generated into `/data/bootstrap-token` |
 | `DARKFACTORY_PERSONAL_MODE` | Personal local pilot mode (see [Executor connections](#executor-connections)) | `0` |
 | `DARKFACTORY_PUBLIC_URL` | Factory address used in notification links | `http://127.0.0.1:8080` |
+| `DARKFACTORY_DIRECTOR_MODEL_CLAUDE`, `DARKFACTORY_DIRECTOR_MODEL_CODEX` | Model for the Director chat on that provider's subscriptions, for example a lighter one than the agents use. A project's Director profile with a model wins. With the Claude variable set, the Director tries Claude subscriptions first | empty: the connection's model |
 
 > [!WARNING]
 > For employee access, put an HTTPS reverse proxy in front of the application. PostgreSQL is not published externally.

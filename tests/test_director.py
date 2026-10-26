@@ -226,15 +226,13 @@ def test_login_code_never_reaches_model_or_receipts(client, setup_project, monke
         assert "SECRET-DEVICE-CODE" not in json.dumps(db.get(director.Dialogue, identifier).actions)
 
 
-def test_real_executor_builds_readonly_director_job(client, setup_project, monkeypatch):
+def run_director_in_docker(monkeypatch):
+    """Advance the queue through the real DockerExecutor with a stub Docker; returns the jobs it built."""
     from contextlib import nullcontext
 
     from darkfactory import execution
     from darkfactory.db import ROOT
 
-    project, pool = setup_project
-    connect(client, pool)
-    identifier = queue(client)
     seen = []
     errors = []
     original = execution.DockerExecutor.run
@@ -283,8 +281,28 @@ def test_real_executor_builds_readonly_director_job(client, setup_project, monke
     monkeypatch.setattr(execution.time, "sleep", lambda seconds: None)
     director.advance_dialogues()
     assert len(seen) == 1, errors
+    return seen
+
+
+def test_real_executor_builds_readonly_director_job(client, setup_project, monkeypatch):
+    project, pool = setup_project
+    connect(client, pool)
+    identifier = queue(client)
+    job = run_director_in_docker(monkeypatch)[0]
+    assert job["model"] != "light-director"
     with Session() as db:
         assert db.get(director.Dialogue, identifier).reply == "Ready"
+
+
+def test_director_model_from_environment_and_claude_first(client, setup_project, monkeypatch):
+    """Agents keep the subscription's model; the Director runs on the lighter one, on Claude first."""
+    project, pool = setup_project
+    connect(client, pool, "codex", "codex-account")
+    connect(client, pool, "claude", "claude-account")
+    monkeypatch.setenv("DARKFACTORY_DIRECTOR_MODEL_CLAUDE", "light-director")
+    queue(client)
+    job = run_director_in_docker(monkeypatch)[0]
+    assert job["provider"] == "claude" and job["model"] == "light-director"
 
 
 def test_catalog_mcp_environment_allowed_only_exact_builtin(client, setup_project):
