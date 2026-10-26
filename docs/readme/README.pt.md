@@ -55,6 +55,7 @@ Por padrão, a tarefa vai direto para um único desenvolvedor, sem plano e sem s
 - [Limites e incidentes](#limites-e-incidentes)
 - [Verificações da implementação](#verificações-da-implementação)
 - [Testes de UI no navegador](#testes-de-ui-no-navegador)
+- [Testes do stand e deploys no GitLab](#testes-do-stand-e-deploys-no-gitlab)
 - [API e dados](#api-e-dados)
 - [Idiomas da interface](#idiomas-da-interface)
 - [Licença](#licença)
@@ -209,7 +210,7 @@ Uma tarefa recebe sua própria cópia de trabalho e branch, um contêiner sem ro
 A rede do contêiner é desativada. O HTTPS fica disponível por meio de um proxy CONNECT apenas para o provedor selecionado e para as entradas `host:port` explicitamente permitidas do projeto. As verificações são offline por padrão. Os segredos de teste são passados separadamente; o proxy não abre acesso arbitrário ao host.
 
 > [!WARNING]
-> A implantação em produção não está implementada. A fábrica entrega somente em `preprod`.
+> A fábrica mescla somente em `preprod`. Um deploy só roda depois que o dono faz merge em `main`, pelo job do GitLab próprio do projeto ([Testes do stand e deploys no GitLab](#testes-do-stand-e-deploys-no-gitlab)).
 
 ### Imagem do executor e configurações de teste
 
@@ -422,7 +423,7 @@ Para os funcionários, defina um endereço da fábrica acessível a eles por mei
 Quando uma tarefa de nível superior é concluída, a notificação também contém um link **"Merge em main / rejeitar"**. É uma proposta de merge dentro da fábrica, disponível também para Git local. Ela fixa o commit aceito e mostra o diff completo em relação ao `main` atual (até 100.000 caracteres, com uma marca de truncamento). O proprietário pode fazer o merge ou rejeitar; o link GET não altera nada por si só. A transferência inclui todas as alterações de `preprod` até o commit indicado, inclusive as subtarefas. A rejeição mantém o `preprod`.
 
 > [!NOTE]
-> Não há transferência automática para `main` nem implantação; o Director não pode tomar essa decisão. Se o `main` divergiu do commit aceito, são necessárias antes uma integração e novas verificações. Tarefas antigas já concluídas não recebem novas propostas automaticamente.
+> Não há transferência automática para `main` nem implantação; o Director não pode tomar essa decisão. Um projeto do GitLab com job de deploy é implantado após o merge feito pelo dono ([veja abaixo](#testes-do-stand-e-deploys-no-gitlab)). Se o `main` divergiu do commit aceito, são necessárias antes uma integração e novas verificações. Tarefas antigas já concluídas não recebem novas propostas automaticamente.
 
 ### Sincronização de main de volta para preprod
 
@@ -488,6 +489,32 @@ O piloto de navegador real cria um projeto Git local separado com bugs em um for
 ```sh
 docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
+
+## Testes do stand e deploys no GitLab
+
+A fábrica pode testar por conta própria a aplicação implantada e fazer o deploy do `main` pelo GitLab. Ambos são configurados nas definições do projeto.
+
+### Testador do stand
+
+Em **"Endereço do stand"**, informe a página que o testador abre primeiro, por exemplo o Studio do stand. Em **"Outros endereços do stand"**, liste no formato `host:port`, um por linha, os demais hosts que o stand chama (servidor de autenticação, API). Endereços internos são permitidos aqui: o dono os escolhe da mesma forma que escolhe hosts permitidos. Coloque as contas de teste nas variáveis de teste (`E2E_USER`, `E2E_PASSWORD` etc.); o testador as lê do próprio ambiente, e os valores nunca chegam ao prompt nem à transcrição.
+
+A cada **N horas** (`qa_hours`, 4 por padrão, `0` desliga o temporizador), após cada deploy bem-sucedido e ao clicar em **"Testar o stand"**, um agente abre o stand no Chromium (Playwright MCP) e atua como um testador manual: faz login, percorre os fluxos principais, formulários, as duas viewports, erros do console e requisições com falha. O código do preprod é montado somente para leitura, para que o agente possa apontar os arquivos prováveis. O navegador só alcança os hosts do stand, pelo proxy de saída da tarefa; erros de certificado de uma CA interna são ignorados para essas origens.
+
+Cada defeito que o agente reproduz duas vezes vira uma tarefa de correção comum, com os passos, o resultado esperado e o obtido, e as capturas de tela anexadas. No máximo `qa_max_tasks` tarefas por execução (3 por padrão); bugs abertos do stand são passados à execução seguinte para não serem reportados de novo, e o temporizador pausa enquanto houver 8 deles abertos. O agente cria apenas os próprios dados, com o prefixo `df-qa-`, e nunca altera usuários ou configurações. Depois de um deploy, ele primeiro reverifica os bugs do stand cujas correções foram publicadas: uma correção confirmada é marcada na tarefa, e um bug que ainda se reproduz recebe uma nova tarefa relacionada.
+
+Notificações: `qa_reported` e `qa_not_fixed`. API: `POST /api/projects/{id}/qa` inicia uma execução agora. A execução usa o pool de escritores do projeto e dura no máximo `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` desativa os testes do stand em toda a instalação.
+
+### Deploys no GitLab
+
+Para um projeto do GitLab, informe em **"Job de deploy do GitLab"** o nome de um job manual do pipeline de `main` (por exemplo, `deploy`). Um projeto com MRs do GitLab usa o servidor de MR e o token dele; um projeto sem MRs usa a API ao lado da sua URL Git HTTPS (`https://host/api/v4`) e o token do Git, então continua funcionando sem MRs. O token precisa do escopo `api` e da permissão para executar esse job, inclusive em um ambiente protegido. Depois que o dono faz merge em `main` (veja [Promoção para main](#promoção-para-main)), a fábrica:
+
+1. encontra o pipeline do novo commit de `main`;
+2. aguarda os jobs do estágio `build` terminarem, para que as imagens do commit existam;
+3. executa o job de deploy e acompanha a execução;
+4. informa o resultado na tarefa promovida (`deploy_started`, `deploy_succeeded`, `deploy_failed`, com o fim do log do job) e nos canais de notificação;
+5. após um deploy bem-sucedido, inicia o testador do stand.
+
+Uma falha na construção da imagem interrompe o deploy sem executar o job. Um job de deploy já iniciado pelo GitLab é acompanhado, não iniciado de novo. Enquanto um deploy roda, um merge mais recente aguarda até ele terminar. O botão **"Fazer deploy da main"** e `POST /api/projects/{id}/deploy` implantam a ponta atual de `main` a pedido do dono. Não há rollback automático; o próprio job decide como tratar uma versão com falha.
 
 ## API e dados
 

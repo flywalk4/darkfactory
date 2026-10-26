@@ -16,12 +16,14 @@ from . import (
     agents,
     backlog,
     cleanup,
+    deploys,
     disk,
     environment,
     initialization,
     logs,
     mainsync,
     service,
+    standqa,
     toolchains,
     usage,
 )
@@ -1734,6 +1736,8 @@ def main():
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as telegrams,
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as sweeps,
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as syncs,
+        concurrent.futures.ThreadPoolExecutor(max_workers=1) as testers,
+        concurrent.futures.ThreadPoolExecutor(max_workers=1) as releases,
     ):
         telegram = None
         grouping = None
@@ -1743,6 +1747,8 @@ def main():
         dialogue = None
         sweeping = None
         syncing = None
+        testing = None
+        releasing = None
         while not stopping.is_set():
             try:
                 futures = {f for f in futures if not f.done()}
@@ -1760,6 +1766,10 @@ def main():
                 supervision = periodic(supervision, supervisors, handle_stop)
                 if backlog.enabled():
                     grouping = periodic(grouping, backlogs, backlog.plan)
+                # A stand run takes up to half an hour; deploys only poll GitLab.
+                if standqa.enabled():
+                    testing = periodic(testing, testers, standqa.run)
+                releasing = periodic(releasing, releases, deploys.advance)
                 login = periodic(login, logins, advance_logins)
                 telegram = periodic(telegram, telegrams, listen_telegram)
                 delivery = periodic(delivery, notifications, exchange)

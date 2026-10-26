@@ -371,7 +371,7 @@ def extend_runner(lockdir, generation, until):
 
 def watch_activity(task, role, evidence, started, stalled):
     """Record one stall event per silence period; return the new stalled flag."""
-    if role == "director":
+    if role in {"director", "qa"}:
         return stalled
     idle = time.time() - last_activity(evidence, started)
     if stalled == (idle >= stall_seconds()):
@@ -553,6 +553,10 @@ class DockerExecutor:
 
             if guide := project_guide(project.id):
                 profile = {**profile, "skill_definitions": [*profile["skill_definitions"], guide]}
+        if role == "qa":
+            from .standqa import profile as tester
+
+            profile = tester(project_config)
         generation = uid()
         lockdir = ROOT / "locks" / task.id
         lockdir.mkdir(parents=True, exist_ok=True)
@@ -569,8 +573,8 @@ class DockerExecutor:
         except PermissionError:
             evidence.chmod(0o777)
         attachments.directory(task.id).mkdir(parents=True, exist_ok=True)
-        # The director works on org configuration only and has no project cache.
-        cache = ROOT / "caches" / project.id if role != "director" else None
+        # The director works on org configuration only and the stand tester only reads; neither has a cache.
+        cache = ROOT / "caches" / project.id if role not in {"director", "qa"} else None
         if cache and not cache.is_dir():
             cache.mkdir(parents=True)
             cache.chmod(0o777)
@@ -856,12 +860,12 @@ class DockerExecutor:
         container = None
         try:
             allowed, denied, mirror_env = set(), set(), {}
-            if project_config.get("package_registries", True) and role != "director":
+            if project_config.get("package_registries", True) and role not in {"director", "qa"}:
                 allowed |= PACKAGE_REGISTRIES
                 mirror_hosts, mirror_env = mirrors.configure(ROOT / "workspaces" / task.id)
                 allowed |= mirror_hosts
             toolchain = toolchains.state(getattr(project, "id", None))
-            if role != "director":
+            if role not in {"director", "qa"}:
                 # Feeds the repository declares itself (corporate NuGet/npm/PyPI/Maven) are part of its toolchain.
                 for authority in toolchain.get("feeds", []):
                     host, _, port = authority.rpartition(":")
@@ -940,7 +944,7 @@ class DockerExecutor:
                     scoped_mount(
                         f"workspaces/{task.id}",
                         "/workspace",
-                        readonly=role in {"review", "plan", "director", "locate"},
+                        readonly=role in {"review", "plan", "director", "locate", "qa"},
                     ),
                     scoped_mount(f"workspaces/{task.id}/.git", "/workspace/.git", readonly=True),
                     scoped_mount(f"jobs/{generation}", "/run/job", readonly=True),

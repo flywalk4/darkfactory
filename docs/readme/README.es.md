@@ -55,6 +55,7 @@ Por defecto, una tarea va directamente a un único desarrollador, sin plan ni su
 - [Límites e incidentes](#límites-e-incidentes)
 - [Comprobaciones de la implementación](#comprobaciones-de-la-implementación)
 - [Pruebas de UI en el navegador](#pruebas-de-ui-en-el-navegador)
+- [Pruebas del stand y despliegues en GitLab](#pruebas-del-stand-y-despliegues-en-gitlab)
 - [API y datos](#api-y-datos)
 - [Idiomas de la interfaz](#idiomas-de-la-interfaz)
 - [Licencia](#licencia)
@@ -209,7 +210,7 @@ Una tarea recibe su propia copia de trabajo y rama, un contenedor sin root, un s
 La red del contenedor está desactivada. HTTPS está disponible a través de un proxy CONNECT solo hacia el proveedor seleccionado y hacia las entradas `host:port` permitidas explícitamente por el proyecto. Las comprobaciones son offline por defecto. Los secretos de prueba se pasan por separado; el proxy no abre acceso arbitrario a hosts.
 
 > [!WARNING]
-> El despliegue a producción no está implementado. La fábrica entrega únicamente a `preprod`.
+> La fábrica solo fusiona en `preprod`. Un despliegue se ejecuta únicamente después de que el propietario fusione en `main`, mediante el job de GitLab propio del proyecto ([Pruebas del stand y despliegues en GitLab](#pruebas-del-stand-y-despliegues-en-gitlab)).
 
 ### Imagen del ejecutor y ajustes de prueba
 
@@ -422,7 +423,7 @@ Para los empleados, define en `.env` una dirección de la fábrica accesible par
 Cuando termina una tarea de nivel superior, la notificación también contiene un enlace **"Merge a main / rechazar"**. Es una propuesta de merge dentro de la fábrica, disponible también para Git local. Fija el commit aceptado y muestra el diff completo respecto al `main` actual (hasta 100 000 caracteres, con una marca de truncado). El propietario puede fusionar o rechazar; el enlace GET no cambia nada por sí mismo. La transferencia incluye todos los cambios de `preprod` hasta el commit indicado, incluidas las subtareas. El rechazo conserva `preprod`.
 
 > [!NOTE]
-> No hay transferencia automática a `main` ni despliegue; el Director no puede tomar esta decisión. Si `main` ha divergido del commit aceptado, primero hacen falta una integración y nuevas comprobaciones. Las tareas antiguas ya completadas no reciben propuestas nuevas automáticamente.
+> No hay transferencia automática a `main` ni despliegue; el Director no puede tomar esta decisión. Un proyecto de GitLab con un job de despliegue se despliega tras la fusión del propietario ([más abajo](#pruebas-del-stand-y-despliegues-en-gitlab)). Si `main` ha divergido del commit aceptado, primero hacen falta una integración y nuevas comprobaciones. Las tareas antiguas ya completadas no reciben propuestas nuevas automáticamente.
 
 ### Sincronizar main de vuelta a preprod
 
@@ -488,6 +489,32 @@ El piloto real de navegador crea un proyecto Git local independiente con errores
 ```sh
 docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
+
+## Pruebas del stand y despliegues en GitLab
+
+La fábrica puede probar por sí misma la aplicación desplegada y desplegar `main` a través de GitLab. Ambas funciones se configuran en los ajustes del proyecto.
+
+### Tester del stand
+
+Configura **"Dirección del stand"** con la página que el tester abre primero, por ejemplo el Studio del stand. En **"Otras direcciones del stand"** indica, en formato `host:port`, los demás hosts a los que llama el stand (servidor de autenticación, API). Aquí se permiten direcciones internas: el propietario las elige igual que los hosts permitidos. Coloca las cuentas de prueba en las variables de test (`E2E_USER`, `E2E_PASSWORD`, etc.); el tester las lee de su entorno, y sus valores nunca llegan al prompt ni a la transcripción.
+
+Cada **N horas** (`qa_hours`, 4 por defecto, `0` desactiva el temporizador), después de cada despliegue correcto y con el botón **"Probar el stand"**, un agente abre el stand en Chromium (Playwright MCP) y trabaja como un tester manual: inicia sesión, recorre los flujos principales, formularios, ambos viewports, errores de consola y peticiones fallidas. El código de preprod se monta en modo solo lectura para que el agente pueda nombrar los archivos probables. El navegador solo llega a los hosts del stand, a través del proxy de salida de la tarea; los errores de certificado de una CA interna se ignoran para esos orígenes.
+
+Cada defecto que el agente reproduce dos veces se convierte en una tarea de corrección normal, con los pasos, el resultado esperado y el real, y las capturas adjuntas. Como máximo `qa_max_tasks` tareas por ejecución (3 por defecto); los defectos abiertos del stand se pasan a la siguiente ejecución para no reportarlos de nuevo, y el temporizador se pausa mientras haya 8 abiertos. El agente solo crea sus propios datos con el prefijo `df-qa-` y nunca cambia usuarios ni ajustes. Tras un despliegue, primero vuelve a comprobar los defectos del stand cuyas correcciones se han publicado: una corrección confirmada se marca en la tarea, y un defecto que sigue reproduciéndose recibe una nueva tarea relacionada.
+
+Notificaciones: `qa_reported` y `qa_not_fixed`. API: `POST /api/projects/{id}/qa` inicia una ejecución ahora. La ejecución usa el pool de escritores del proyecto y dura como máximo `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` desactiva las pruebas del stand en toda la instalación.
+
+### Despliegues en GitLab
+
+Para un proyecto de GitLab, configura **"Job de despliegue de GitLab"** con el nombre de un job manual del pipeline de `main` (por ejemplo, `deploy`). Un proyecto con MR de GitLab usa el servidor de MR y su token; un proyecto sin MR usa la API junto a su URL Git HTTPS (`https://host/api/v4`) y el token de Git, así que sigue funcionando sin MR. El token necesita el alcance `api` y el permiso para ejecutar ese job, incluido el entorno protegido. Después de que el propietario fusione en `main` (ver [Promoción a main](#promoción-a-main)), la fábrica:
+
+1. encuentra el pipeline del nuevo commit de `main`;
+2. espera a que terminen los jobs de la etapa `build`, para que existan las imágenes del commit;
+3. ejecuta el job de despliegue y lo sigue;
+4. informa del resultado en la tarea promocionada (`deploy_started`, `deploy_succeeded`, `deploy_failed`, con el final del log del job) y en los canales de notificación;
+5. tras un despliegue correcto, inicia el tester del stand.
+
+Un fallo en la construcción de la imagen detiene el despliegue sin ejecutar el job. Un job de despliegue ya iniciado desde GitLab se sigue, no se vuelve a iniciar. Mientras se ejecuta un despliegue, una fusión más nueva espera a que termine. El botón **"Desplegar main"** y `POST /api/projects/{id}/deploy` despliegan la punta actual de `main` a petición del propietario. No hay rollback automático; el propio job decide cómo tratar una versión fallida.
 
 ## API y datos
 

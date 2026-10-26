@@ -151,6 +151,7 @@ for line in sys.stdin:
         monkeypatch.setenv(key, "private-parent-credential")
     # The runner's own HOME belongs to root; the server gets a writable one of its own.
     monkeypatch.setenv("HOME", str(tmp_path / "runner-home"))
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
     processes = []
     original = mcp_bridge.subprocess.Popen
 
@@ -163,7 +164,7 @@ for line in sys.stdin:
     server = config(
         transport="stdio",
         command=sys.executable,
-        args=[str(script)],
+        args=[str(script), "--proxy-server", "${HTTPS_PROXY}", "${CODEX_ACCESS_TOKEN}"],
         env={"CUSTOM_MCP": "explicit"},
         url=None,
         headers=None,
@@ -178,6 +179,8 @@ for line in sys.stdin:
         assert result == {"configured": "explicit", "leaked": []}
         assert home != str(tmp_path / "runner-home") and os.path.isfile(os.path.join(home, "cache"))
         assert processes[0].poll() is None
+        # Only the proxy and other safe variables expand; a credential name stays literal.
+        assert processes[0].args[2:] == ["--proxy-server", "http://127.0.0.1:3128", "${CODEX_ACCESS_TOKEN}"]
     assert processes[0].poll() is not None
     assert not os.path.exists(home)
     assert processes[0].stdin.closed and processes[0].stdout.closed

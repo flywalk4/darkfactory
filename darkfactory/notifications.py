@@ -53,6 +53,10 @@ IMPORTANT_KINDS = frozenset(
         "network_unstable",
         "review_repeated",
         "disk_low",
+        "deploy_succeeded",
+        "deploy_failed",
+        "qa_reported",
+        "qa_not_fixed",
     }
 )
 # Stops the supervisor tries to resolve before paging the owner.
@@ -373,6 +377,8 @@ def queue_notification(db, task, kind, message, event_id=None):
         )
     elif kind in {"accepted", "merged"}:
         body = _completion_message(db, task, message)
+    elif kind in {"deploy_succeeded", "deploy_failed", "qa_reported", "qa_not_fixed"}:
+        body = f"Darkfactory · {str(message)[:2500]}\nКарточка: {task_url(task)}"
     else:
         body = f"Darkfactory · {task.title[:300]}\nTask {task.id} · {task.state}\n{str(message)[:2000]}"
     key = (

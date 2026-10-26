@@ -702,7 +702,7 @@ class Repository:
             self._refresh_locked()
             preview = self._main_preview_locked(sha)
             if preview["already_merged"]:
-                return
+                return preview["main_sha"]
             if preview["main_sha"] != expected_main:
                 raise GitError("Ветка main изменилась; заново открой предложение слияния")
             if not preview["can_merge"]:
@@ -727,3 +727,4 @@ class Repository:
                 f"{target}:refs/heads/main",
                 cwd=self.mirror,
             )
+            return target

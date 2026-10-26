@@ -10,6 +10,7 @@ from fastapi import Header
 from . import (
     backlog,
     service,
+    standqa,
     toolchains,
 )
 from .db import (
@@ -68,6 +69,12 @@ def project_settings(row):
         backlog_hours=config.get("backlog_hours", backlog.INTERVAL_HOURS),
         max_tree_seconds=config.get("max_tree_seconds") or 43200,
         test_env_keys=sorted(config.get("test_env", {})),
+        stand_url=config.get("stand_url"),
+        stand_hosts=config.get("stand_hosts", []),
+        qa_hours=config.get("qa_hours", standqa.INTERVAL_HOURS),
+        qa_max_tasks=config.get("qa_max_tasks", standqa.MAX_TASKS),
+        qa_instructions=config.get("qa_instructions", ""),
+        deploy_job=config.get("deploy_job"),
         environment={
             name: item
             for name, item in toolchains.state(row.id).items()

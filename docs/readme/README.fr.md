@@ -55,6 +55,7 @@ Par défaut, une tâche va directement à un seul développeur, sans plan ni sou
 - [Limites et incidents](#limites-et-incidents)
 - [Vérification de la mise en œuvre](#vérification-de-la-mise-en-œuvre)
 - [Tests UI dans le navigateur](#tests-ui-dans-le-navigateur)
+- [Tests du stand et déploiements GitLab](#tests-du-stand-et-déploiements-gitlab)
 - [API et données](#api-et-données)
 - [Langues disponibles](#langues-disponibles)
 - [Licence](#licence)
@@ -209,7 +210,7 @@ Une tâche reçoit sa propre copie de travail et sa propre branche, un conteneur
 Le réseau du conteneur est désactivé. HTTPS n'est disponible, via un proxy CONNECT, que vers le fournisseur sélectionné et les entrées `host:port` explicitement autorisées du projet. Les vérifications sont hors ligne par défaut. Les secrets de test sont transmis séparément ; le proxy n'ouvre pas d'accès arbitraire à des hôtes.
 
 > [!WARNING]
-> Le déploiement en production n'est pas implémenté. L'usine livre uniquement vers `preprod`.
+> L'usine ne fusionne que vers `preprod`. Un déploiement n'est exécuté qu'après la fusion par le propriétaire dans `main`, via le job GitLab propre au projet ([Tests du stand et déploiements GitLab](#tests-du-stand-et-déploiements-gitlab)).
 
 ### Image de l'exécuteur et paramètres de test
 
@@ -422,7 +423,7 @@ Pour les employés, définissez une adresse de l'usine qui leur est accessible v
 Lorsqu'une tâche de premier niveau se termine, la notification contient aussi un lien **« Fusionner dans main / rejeter »**. Il s'agit d'une proposition de fusion interne à l'usine, disponible aussi pour Git local. Elle épingle le commit accepté et affiche le diff complet par rapport au `main` actuel (jusqu'à 100 000 caractères, avec une marque de troncature). Le propriétaire peut la fusionner ou la rejeter ; le lien GET ne modifie rien par lui-même. Le transfert inclut toutes les modifications de `preprod` jusqu'au commit indiqué, sous-tâches comprises. Un rejet conserve `preprod`.
 
 > [!NOTE]
-> Il n'existe aucun transfert automatique vers `main` ni déploiement ; le Director ne peut pas prendre cette décision. Si `main` a divergé du commit accepté, une intégration et de nouvelles vérifications sont d'abord nécessaires. Les anciennes tâches terminées ne reçoivent pas automatiquement de nouvelles propositions.
+> Il n'existe aucun transfert automatique vers `main` ni déploiement ; le Director ne peut pas prendre cette décision. Un projet GitLab doté d'un job de déploiement se déploie après la fusion du propriétaire ([voir plus bas](#tests-du-stand-et-déploiements-gitlab)). Si `main` a divergé du commit accepté, une intégration et de nouvelles vérifications sont d'abord nécessaires. Les anciennes tâches terminées ne reçoivent pas automatiquement de nouvelles propositions.
 
 ### Resynchronisation de main vers preprod
 
@@ -488,6 +489,32 @@ Le pilote navigateur réel crée un projet Git local distinct contenant des bugs
 ```sh
 docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
+
+## Tests du stand et déploiements GitLab
+
+L'usine peut tester elle-même l'application déployée et déployer `main` via GitLab. Ces deux fonctions se configurent dans les paramètres du projet.
+
+### Testeur du stand
+
+Renseignez **« Adresse du stand »** avec la page que le testeur ouvre en premier, par exemple le Studio du stand. Listez dans **« Autres adresses du stand »** les autres hôtes appelés par le stand (serveur d'authentification, API), au format `host:port`. Les adresses internes sont autorisées ici : le propriétaire les choisit comme les hôtes autorisés. Placez les comptes de test dans les variables de test (`E2E_USER`, `E2E_PASSWORD`, etc.) ; le testeur les lit depuis son environnement, et leurs valeurs n'atteignent jamais le prompt ni la transcription.
+
+Toutes les **N heures** (`qa_hours`, 4 par défaut, `0` désactive la minuterie), après chaque déploiement réussi et sur le bouton **« Tester le stand »**, un agent ouvre le stand dans Chromium (Playwright MCP) et travaille comme un testeur manuel : il se connecte, parcourt les parcours principaux, les formulaires, les deux viewports, les erreurs de console et les requêtes échouées. Le code de preprod est monté en lecture seule afin que l'agent puisse nommer les fichiers probables. Le navigateur n'atteint que les hôtes du stand, via le proxy de sortie de la tâche ; les erreurs de certificat d'une CA interne sont ignorées pour ces origines.
+
+Chaque défaut que l'agent a reproduit deux fois devient une tâche de correction ordinaire, avec les étapes, le résultat attendu et le résultat réel, et les captures d'écran jointes. Au maximum `qa_max_tasks` tâches par exécution (3 par défaut) ; les bogues ouverts du stand sont transmis à l'exécution suivante pour ne pas être signalés de nouveau, et la minuterie se met en pause tant que 8 d'entre eux sont ouverts. L'agent ne crée que ses propres données, avec le préfixe `df-qa-`, et ne modifie jamais les utilisateurs ni les paramètres. Après un déploiement, il revérifie d'abord les bogues du stand dont les corrections ont été livrées : une correction confirmée est marquée sur la tâche, et un bogue qui se reproduit encore reçoit une nouvelle tâche liée.
+
+Notifications : `qa_reported` et `qa_not_fixed`. API : `POST /api/projects/{id}/qa` lance une exécution immédiatement. L'exécution utilise le pool d'écrivains du projet et dure au plus `DARKFACTORY_QA_SECONDS` (1800) ; `DARKFACTORY_STAND_QA=0` désactive les tests du stand pour toute l'installation.
+
+### Déploiements GitLab
+
+Pour un projet GitLab, renseignez **« Job de déploiement GitLab »** avec le nom d'un job manuel du pipeline de `main` (par exemple `deploy`). Un projet avec des MR GitLab utilise le serveur de MR et son jeton ; un projet sans MR utilise l'API à côté de son URL Git HTTPS (`https://host/api/v4`) et le jeton Git, il continue donc de fonctionner sans MR. Le jeton a besoin de la portée `api` et du droit d'exécuter ce job, y compris sur un environnement protégé. Après la fusion par le propriétaire dans `main` (voir [Promotion vers main](#promotion-vers-main)), l'usine :
+
+1. trouve le pipeline du nouveau commit de `main` ;
+2. attend la fin des jobs de l'étape `build`, pour que les images du commit existent ;
+3. lance le job de déploiement et le suit ;
+4. signale le résultat sur la tâche promue (`deploy_started`, `deploy_succeeded`, `deploy_failed`, avec la fin du journal du job) et dans les canaux de notification ;
+5. après un déploiement réussi, démarre le testeur du stand.
+
+Un échec de construction d'image arrête le déploiement sans lancer le job. Un job de déploiement déjà démarré depuis GitLab est suivi, sans être relancé. Pendant qu'un déploiement s'exécute, une fusion plus récente attend qu'il se termine. Le bouton **« Déployer main »** et `POST /api/projects/{id}/deploy` déploient la pointe actuelle de `main` à la demande du propriétaire. Il n'existe pas de restauration automatique ; c'est le job lui-même qui décide comment traiter une version en échec.
 
 ## API et données
 

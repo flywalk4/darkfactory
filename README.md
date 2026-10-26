@@ -55,6 +55,7 @@ By default a task goes straight to a single developer, with no plan and no subta
 - [Limits and incidents](#limits-and-incidents)
 - [Implementation checks](#implementation-checks)
 - [Browser UI testing](#browser-ui-testing)
+- [Stand testing and GitLab deploys](#stand-testing-and-gitlab-deploys)
 - [API and data](#api-and-data)
 - [Interface languages](#interface-languages)
 - [License](#license)
@@ -209,7 +210,7 @@ A task gets its own working copy and branch, a non-root container, a read-only r
 The container network is disabled. HTTPS is available through a CONNECT proxy only to the selected provider and the project's explicitly allowed `host:port` entries. Checks are offline by default. Test secrets are passed separately; the proxy does not open arbitrary host access.
 
 > [!WARNING]
-> Production deployment is not implemented. The factory delivers only to `preprod`.
+> The factory merges only into `preprod`. A deploy runs only after the owner merges into `main`, through the project's own GitLab job ([Stand testing and GitLab deploys](#stand-testing-and-gitlab-deploys)).
 
 ### Executor image and test settings
 
@@ -422,7 +423,7 @@ For employees, set a factory address reachable by them through `DARKFACTORY_PUBL
 When a top-level task completes, the notification also contains a **"Merge to main / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current `main` (up to 100,000 characters, with a truncation mark). The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
 
 > [!NOTE]
-> There is no automatic transfer to `main` and no deployment; the Director cannot make this decision. If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
+> There is no automatic transfer to `main`; the Director cannot make this decision. A GitLab project with a deploy job deploys after the owner's merge ([below](#stand-testing-and-gitlab-deploys)). If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
 
 ### Syncing main back into preprod
 
@@ -488,6 +489,32 @@ The real browser pilot creates a separate local Git project with bugs in a form 
 ```sh
 docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
+
+## Stand testing and GitLab deploys
+
+The factory can test the deployed application itself and deploy `main` through GitLab. Both are set in the project settings.
+
+### Stand tester
+
+Set **"Stand address"** to the page the tester opens first, for example the Studio of the stand. List the other hosts the stand calls (sign-in server, API) in **"Other stand hosts"** as `host:port`. Internal addresses are allowed here: the owner chooses them like allowed hosts. Put test accounts into the test variables (`E2E_USER`, `E2E_PASSWORD` and so on); the tester reads them from its environment, and their values never reach the prompt or the transcript.
+
+Every **N hours** (`qa_hours`, 4 by default, `0` turns the timer off), after each successful deploy and on the **"Test stand"** button, an agent opens the stand in Chromium (Playwright MCP) and works like a manual tester: it signs in, goes through the main flows, forms, both viewports, console errors and failed requests. The preprod code is mounted read-only so the agent can name the likely files. The browser reaches only the stand hosts, through the task's egress proxy; certificate errors of an internal CA are ignored for those origins.
+
+Each defect the agent reproduced twice becomes an ordinary fix task with the steps, the expected and actual result and the screenshots attached. At most `qa_max_tasks` tasks per run (3 by default); open stand bugs are passed to the next run so they are not reported again, and the timer pauses while 8 of them are open. The agent creates only its own data with the `df-qa-` prefix and never changes users or settings. After a deploy it first re-checks the stand bugs whose fixes went out: a confirmed fix is marked on the task, and a bug that still reproduces gets a new related task.
+
+Notifications: `qa_reported` and `qa_not_fixed`. API: `POST /api/projects/{id}/qa` starts a run now. The run uses the project's writer pool and lasts at most `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` turns stand testing off for the whole installation.
+
+### GitLab deploys
+
+For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in the `main` pipeline (for example `deploy`). A project with GitLab MRs uses the MR server and its token; a project without them uses the API beside its HTTPS Git URL (`https://host/api/v4`) and the Git token, so it keeps working without MRs. The token needs the `api` scope and the right to run that job, including a protected environment. After the owner merges into `main` (see [Promoting to main](#promoting-to-main)), the factory:
+
+1. finds the pipeline of the new `main` commit;
+2. waits until the jobs of the `build` stage finish, so the images of the commit exist;
+3. plays the deploy job and follows it;
+4. reports the result on the promoted task (`deploy_started`, `deploy_succeeded`, `deploy_failed` with the end of the job log) and in the notification channels;
+5. after a successful deploy, starts the stand tester.
+
+A failed image build stops the deploy without playing the job. A deploy job already started from GitLab is followed, not started again. While one deploy runs, a newer merge waits for it. The **"Deploy main"** button and `POST /api/projects/{id}/deploy` deploy the current `main` tip on the owner's request. There is no automatic rollback; the job itself decides how to handle a failed release.
 
 ## API and data
 

@@ -15,10 +15,12 @@ from sqlalchemy import delete, select, update
 from .. import (
     agents,
     backlog,
+    deploys,
     environment,
     initialization,
     mainsync,
     service,
+    standqa,
     toolchains,
 )
 from ..db import (
@@ -110,6 +112,14 @@ class ProjectInput(BaseModel):
     backlog_hours: int = Field(default=backlog.INTERVAL_HOURS, ge=0, le=168)
     max_tree_seconds: int = Field(default=43200, ge=600, le=7 * 86400)
     test_env: dict[str, str] | None = None
+    # Stand testing: the deployed app the tester opens, extra hosts it calls (auth, API), and how often.
+    stand_url: str | None = Field(default=None, max_length=500)
+    stand_hosts: list[str] | None = Field(default=None, max_length=20)
+    qa_hours: int = Field(default=standqa.INTERVAL_HOURS, ge=0, le=168)
+    qa_max_tasks: int = Field(default=standqa.MAX_TASKS, ge=1, le=10)
+    qa_instructions: str | None = Field(default=None, max_length=8000)
+    # GitLab only: the manual job the factory plays after the owner merges into main; empty turns deploys off.
+    deploy_job: str | None = Field(default=None, max_length=255, pattern=r"^[^\n\r]*$")
 
 
 PROJECT_SECRETS = {
@@ -128,6 +138,12 @@ PROJECT_SECRETS = {
     "executor_image",
     "allowed_hosts",
     "test_env",
+    "stand_url",
+    "stand_hosts",
+    "qa_hours",
+    "qa_max_tasks",
+    "qa_instructions",
+    "deploy_job",
 }
 
 
@@ -137,7 +153,9 @@ def project_secrets(value, previous=None, *, initialize_agents=False):
         result["agents"] = agents.default_settings()
     for key in PROJECT_SECRETS & value.model_fields_set:
         item = getattr(value, key)
-        if item is not None and (item != "" or key in {"executor_image"}):
+        if item is not None and (
+            item != "" or key in {"executor_image", "stand_url", "qa_instructions", "deploy_job"}
+        ):
             result[key] = item
     return encrypt(json.dumps(result))
 
@@ -243,6 +261,19 @@ def validate_project(db, a, value, previous=None):
         raise HTTPException(400, "SSH-ключ и проверенные known_hosts нужны вместе")
     for authority in value.allowed_hosts or []:
         valid_authority(authority)
+    if value.stand_url:
+        stand = urlsplit(value.stand_url)
+        if stand.scheme not in {"http", "https"} or not stand.hostname or stand.username or stand.password:
+            raise HTTPException(400, "Адрес стенда: нужен http(s) URL без логина и пароля")
+        if single_label(stand.hostname):
+            raise HTTPException(400, "Адрес стенда: нужно полное имя сервера")
+    # Stand hosts are chosen by the owner like allowed hosts: a stand on a private network is the usual case.
+    for authority in value.stand_hosts or []:
+        valid_authority(authority)
+    if value.deploy_job and value.forge == "github":
+        raise HTTPException(400, "Деплой запускается только через GitLab")
+    if value.deploy_job and value.forge == "git" and not remote.startswith(("https://", "http://")):
+        raise HTTPException(400, "Для деплоя нужен HTTPS-адрес репозитория GitLab или сервер MR GitLab")
     # Only names a test suite would read: an agent must not reach PATH, LD_PRELOAD, proxies or credentials.
     for key in value.test_env or {}:
         if not TEST_ENV_NAME.fullmatch(key):
@@ -420,6 +451,33 @@ def sync_main(project_id: str, a=Depends(access)):
         db.expunge(project)
     result = mainsync.sync_project(project)
     return {key: result.get(key) for key in ("state", "main", "preprod", "conflicts", "task_id", "error")}
+
+
+@router.post("/api/projects/{project_id}/qa")
+def test_stand(project_id: str, a=Depends(access)):
+    """Run the stand tester now instead of waiting for its timer."""
+    a.require("operator")
+    with transaction() as db:
+        project = a.project(db, project_id)
+        if not standqa.request(db, project, "manual"):
+            raise HTTPException(409, "Укажи адрес стенда в настройках проекта")
+        return standqa.state(project)
+
+
+@router.post("/api/projects/{project_id}/deploy")
+def deploy(project_id: str, a=Depends(access)):
+    """Deploy the current main tip through the project's GitLab job; the job itself is in GitLab's hands."""
+    import httpx
+
+    a.require("owner")
+    with transaction() as db:
+        project = a.project(db, project_id)
+        if not deploys.job_name(project):
+            raise HTTPException(409, "Укажи job деплоя GitLab в настройках проекта")
+        try:
+            return deploys.deploy_main(db, project, a.principal.id)
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, f"GitLab не ответил: {exc}") from None
 
 
 @router.get("/api/projects/{project_id}/environment")

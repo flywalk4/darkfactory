@@ -55,6 +55,7 @@ flowchart LR
 - [限制与事件](#限制与事件)
 - [实现验证](#实现验证)
 - [浏览器 UI 测试](#浏览器-ui-测试)
+- [测试环境与 GitLab 部署](#测试环境与-gitlab-部署)
 - [API 与数据](#api-与数据)
 - [界面语言](#界面语言)
 - [许可证](#许可证)
@@ -209,7 +210,7 @@ python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal
 容器网络处于禁用状态。HTTPS 通过 CONNECT 代理提供，只能访问所选提供方和项目明确允许的 `host:port` 条目。检查默认离线运行。测试密钥单独传递；代理不会开放对任意主机的访问。
 
 > [!WARNING]
-> 尚未实现生产环境部署。工厂只交付到 `preprod`。
+> 工厂只合并到 `preprod`。只有在所有者合并到 `main` 之后，才会通过项目自己的 GitLab 任务执行部署（[测试环境与 GitLab 部署](#测试环境与-gitlab-部署)）。
 
 ### 执行器镜像与测试设置
 
@@ -422,7 +423,7 @@ incoming webhook 有两种工作模式，由其“Override Destination Channel�
 顶层任务完成时，通知中还会包含一个 **“合并到 main / 拒绝”** 链接。这是工厂内部的合并提案，本地 Git 同样适用。它会固定已接受的提交，并显示与当前 `main` 的完整 diff（最多 100,000 个字符，带截断标记）。Owner 可以合并或拒绝；GET 链接本身不会改变任何内容。传输范围包括直到指定提交为止的所有 `preprod` 变更，包括子任务。拒绝会保持 `preprod` 不变。
 
 > [!NOTE]
-> 没有自动转入 `main` 的流程，也没有部署；Director 无法做出这个决定。如果 `main` 已偏离已接受的提交，则需要先进行集成和重新检查。旧的已完成任务不会自动获得新的提案。
+> 没有自动转入 `main` 的流程，也没有部署；Director 无法做出这个决定。配置了部署任务的 GitLab 项目会在所有者合并后部署（[见下文](#测试环境与-gitlab-部署)）。如果 `main` 已偏离已接受的提交，则需要先进行集成和重新检查。旧的已完成任务不会自动获得新的提案。
 
 ### 将 main 同步回 preprod
 
@@ -488,6 +489,32 @@ docker compose exec -T -e SMOKE_SSH=1 worker python - < scripts/docker_smoke.py
 ```sh
 docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
+
+## 测试环境与 GitLab 部署
+
+工厂可以自行测试已部署的应用，并通过 GitLab 部署 `main`。两者都在项目设置中配置。
+
+### 测试人员
+
+在 **"环境地址"** 中填写测试人员最先打开的页面，例如环境的 Studio。在 **"其他环境地址"** 中以 `host:port` 的形式列出环境调用的其他主机（认证服务器、API）。这里允许使用内网地址：所有者像选择允许的主机一样选择它们。将测试账号放入测试变量（`E2E_USER`、`E2E_PASSWORD` 等）；测试人员从环境中读取这些变量，其值绝不会进入提示词或对话记录。
+
+每隔 **N 小时**（`qa_hours`，默认 4，`0` 关闭定时器），每次部署成功后以及点击 **"测试环境"** 按钮时，代理会在 Chromium（Playwright MCP）中打开环境，像人工测试员一样工作：登录、走查主要流程、表单、两种视口、控制台错误和失败的请求。preprod 代码以只读方式挂载，便于代理指出可能的文件。浏览器只能访问环境主机，并通过任务的出口代理；对这些来源忽略内部 CA 的证书错误。
+
+每个代理两次复现成功的缺陷都会成为普通的修复任务，附带步骤、预期与实际结果以及截图。每次运行最多创建 `qa_max_tasks` 个任务（默认 3）；未关闭的环境缺陷会传给下一次运行，避免重复报告；当其中有 8 个未关闭时，定时器暂停。代理只创建带 `df-qa-` 前缀的自有数据，绝不修改用户或设置。部署后，它会先复查已发布修复的环境缺陷：确认已修复的会在任务上标记，仍可复现的缺陷会获得新的关联任务。
+
+通知：`qa_reported` 和 `qa_not_fixed`。API：`POST /api/projects/{id}/qa` 立即启动一次运行。运行使用项目的写入者池，最长持续 `DARKFACTORY_QA_SECONDS`（1800）；`DARKFACTORY_STAND_QA=0` 会在整个安装中关闭环境测试。
+
+### GitLab 部署
+
+对于 GitLab 项目，在 **"GitLab 部署任务"** 中填写 `main` 流水线中一个手动任务的名称（例如 `deploy`）。使用 GitLab MR 的项目采用 MR 服务器及其令牌；不使用 MR 的项目采用 HTTPS Git 地址旁的 API（`https://host/api/v4`）和 Git 令牌，因此没有 MR 也能继续工作。令牌需要 `api` 权限范围以及运行该任务的权限，包括受保护的环境。所有者合并到 `main` 之后（见[推进到 main](#推进到-main)），工厂会：
+
+1. 找到新 `main` 提交的流水线；
+2. 等待 `build` 阶段的任务完成，确保该提交的镜像已存在；
+3. 触发部署任务并跟踪其执行；
+4. 在被推进的任务上报告结果（`deploy_started`、`deploy_succeeded`、`deploy_failed`，并附上任务日志末尾）以及通知渠道；
+5. 部署成功后，启动测试人员进行环境测试。
+
+镜像构建失败会在不触发部署任务的情况下停止部署。已从 GitLab 启动的部署任务会被跟踪，而不会再次启动。一次部署运行期间，较新的合并会等待其完成。**"部署 main"** 按钮和 `POST /api/projects/{id}/deploy` 会在所有者请求时部署当前的 `main` 顶端。没有自动回滚；失败的发布如何处理由任务本身决定。
 
 ## API 与数据
 

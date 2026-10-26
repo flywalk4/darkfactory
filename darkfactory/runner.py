@@ -1451,7 +1451,7 @@ def claude(job):
     if job.get("model"):
         args += ["--model", job["model"]]
     # Past ~50 steps an agent rarely solves what it has not; the cap turns a runaway into a handoff.
-    turns = os.getenv("DARKFACTORY_CLAUDE_MAX_TURNS", "80" if job["role"] == "implement" else "40")
+    turns = os.getenv("DARKFACTORY_CLAUDE_MAX_TURNS", "80" if job["role"] in {"implement", "qa"} else "40")
     if int(turns) > 0:
         args += ["--max-turns", turns]
     if job.get("output_schema") or job["role"] in {"review", "plan"}:

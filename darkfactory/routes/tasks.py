@@ -15,6 +15,7 @@ from sqlalchemy import func, or_, select
 from .. import (
     agents,
     attachments,
+    deploys,
     director_stops,
     evidence,
     promotions,
@@ -412,7 +413,7 @@ def promotion_decision(task_id: str, value: PromotionInput, a=Depends(access)):
                 if not value.main_sha:
                     raise HTTPException(400, "Сначала открой сравнение с текущей main")
                 project = promotions.validate(db, task, current)
-                Repository(project, task).promote_main(value.source_sha, value.main_sha)
+                main_sha = Repository(project, task).promote_main(value.source_sha, value.main_sha)
             event(
                 db,
                 task,
@@ -425,6 +426,8 @@ def promotion_decision(task_id: str, value: PromotionInput, a=Depends(access)):
                 main_sha=value.main_sha,
                 actor=a.principal.id,
             )
+            if wanted == "merged":
+                deploys.request(db, project, task, main_sha, a.principal.id)
             db.flush()
             return promotions.proposal(db, task)
     except BlockingIOError:

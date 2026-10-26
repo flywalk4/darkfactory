@@ -55,6 +55,7 @@ flowchart LR
 - [सीमाएँ और incidents](#सीमाएँ-और-incidents)
 - [कार्यान्वयन की जाँच](#कार्यान्वयन-की-जाँच)
 - [Browser UI testing](#browser-ui-testing)
+- [स्टैंड टेस्टिंग और GitLab deploy](#स्टैंड-टेस्टिंग-और-gitlab-deploy)
 - [API और डेटा](#api-और-डेटा)
 - [इंटरफ़ेस की भाषाएँ](#इंटरफ़ेस-की-भाषाएँ)
 - [लाइसेंस](#लाइसेंस)
@@ -209,7 +210,7 @@ Task को अपनी working copy और branch, non-root container, read-on
 Container का नेटवर्क बंद है। HTTPS केवल चुने हुए provider और project की स्पष्ट रूप से अनुमत `host:port` प्रविष्टियों तक CONNECT proxy के ज़रिए उपलब्ध है। Checks डिफ़ॉल्ट रूप से offline चलते हैं। Test secrets अलग से दिए जाते हैं; proxy मनमाने host तक पहुँच नहीं खोलता।
 
 > [!WARNING]
-> Production deployment लागू नहीं है। Factory केवल `preprod` तक पहुँचाती है।
+> Factory केवल `preprod` में merge करती है। Deploy तभी चलता है जब owner `main` में merge कर दे, और वह भी project के अपने GitLab job से ([स्टैंड टेस्टिंग और GitLab deploy](#स्टैंड-टेस्टिंग-और-gitlab-deploy))।
 
 ### Executor image और test सेटिंग्स
 
@@ -422,7 +423,7 @@ Incoming webhook दो मोड में काम करता है, ज�
 जब कोई शीर्ष-स्तरीय task पूरा होता है, तो सूचना में **"Merge to main / reject"** link भी होता है। यह factory के भीतर merge का प्रस्ताव है, स्थानीय Git के लिए भी उपलब्ध। यह स्वीकृत commit को pin करता है और मौजूदा `main` के विरुद्ध पूरा diff दिखाता है (100,000 अक्षरों तक, कटाव-चिह्न के साथ)। Owner इसे merge या अस्वीकार कर सकता है; GET link अपने-आप कुछ नहीं बदलता। स्थानांतरण में बताए गए commit तक `preprod` के सभी बदलाव शामिल होते हैं, subtasks सहित। अस्वीकार करने पर `preprod` जैसा है वैसा रहता है।
 
 > [!NOTE]
-> `main` में कोई automatic स्थानांतरण और कोई deployment नहीं है; Director यह निर्णय नहीं ले सकता। यदि `main` स्वीकृत commit से अलग हो गया है, तो पहले integration और दोबारा checks चाहिए। पुराने पूरे हुए tasks को नए प्रस्ताव अपने-आप नहीं मिलते।
+> `main` में कोई automatic स्थानांतरण और कोई deployment नहीं है; Director यह निर्णय नहीं ले सकता। जिस GitLab project में deploy job है, वह owner के merge के बाद deploy होता है ([नीचे](#स्टैंड-टेस्टिंग-और-gitlab-deploy))। यदि `main` स्वीकृत commit से अलग हो गया है, तो पहले integration और दोबारा checks चाहिए। पुराने पूरे हुए tasks को नए प्रस्ताव अपने-आप नहीं मिलते।
 
 ### main को वापस preprod में sync करना
 
@@ -488,6 +489,32 @@ Screenshots, JSON reports और traces को `/run/evidence` (वेरिए�
 ```sh
 docker compose exec -T -e CODEX_CONNECTION_ID=<connection-id> worker python - < scripts/live_browser_smoke.py
 ```
+
+## स्टैंड टेस्टिंग और GitLab deploy
+
+Factory deploy हुए application की जाँच स्वयं कर सकती है, और GitLab के ज़रिए `main` को deploy भी कर सकती है। दोनों project settings में सेट किए जाते हैं।
+
+### Stand tester
+
+**"स्टैंड का पता"** में वह page लिखें जिसे tester सबसे पहले खोलेगा, जैसे stand का Studio। **"अन्य स्टैंड पते"** में stand जिन दूसरे hosts को call करता है (sign-in server, API), उन्हें `host:port` के रूप में एक-एक पंक्ति में लिखें। यहाँ internal पते अनुमत हैं: owner इन्हें वैसे ही चुनता है जैसे allowed hosts चुने जाते हैं। Test accounts को test variables में रखें (`E2E_USER`, `E2E_PASSWORD` आदि); tester इन्हें अपने environment से पढ़ता है, और इनके मान prompt या transcript तक कभी नहीं पहुँचते।
+
+हर **N घंटे** में (`qa_hours`, डिफ़ॉल्ट 4, `0` timer बंद कर देता है), हर सफल deploy के बाद, और **"स्टैंड टेस्ट करें"** बटन पर, एक agent Chromium (Playwright MCP) में stand खोलता है और मैनुअल tester की तरह काम करता है: sign in करता है, मुख्य flows, forms, दोनों viewports, console errors और असफल requests की जाँच करता है। Agent संभावित files का नाम बता सके, इसके लिए preprod कोड read-only mount होता है। Browser केवल stand hosts तक पहुँचता है, task के egress proxy के ज़रिए; उन origins के लिए internal CA की certificate errors अनदेखी की जाती हैं।
+
+Agent जिस हर defect को दो बार reproduce करता है, वह steps, अपेक्षित और वास्तविक परिणाम तथा screenshots के साथ एक सामान्य fix task बन जाता है। हर run में अधिकतम `qa_max_tasks` tasks (डिफ़ॉल्ट 3); खुले stand bugs अगले run को दिए जाते हैं ताकि उन्हें दोबारा report न किया जाए, और 8 खुले होने पर timer रुक जाता है। Agent केवल `df-qa-` prefix वाला अपना data बनाता है और users या settings कभी नहीं बदलता। Deploy के बाद वह पहले उन stand bugs की दोबारा जाँच करता है जिनके fixes जा चुके हैं: पुष्टि हुए fix को task पर चिह्नित किया जाता है, और जो bug अब भी reproduce होता है उसके लिए नया संबंधित task बनता है।
+
+Notifications: `qa_reported` और `qa_not_fixed`। API: `POST /api/projects/{id}/qa` अभी run शुरू करता है। Run project का writer pool इस्तेमाल करता है और अधिकतम `DARKFACTORY_QA_SECONDS` (1800) तक चलता है; `DARKFACTORY_STAND_QA=0` पूरे installation के लिए stand testing बंद कर देता है।
+
+### GitLab deploys
+
+GitLab project के लिए **"GitLab डिप्लॉय जॉब"** में `main` pipeline के किसी manual job का नाम लिखें (जैसे `deploy`)। GitLab MRs वाला project MR server और उसका token इस्तेमाल करता है; MRs के बिना project अपने HTTPS Git URL के साथ वाली API (`https://host/api/v4`) और Git token इस्तेमाल करता है, इसलिए MRs के बिना भी काम करता रहता है। Token को `api` scope और उस job को चलाने की अनुमति चाहिए, protected environment सहित। Owner के `main` में merge करने के बाद (देखें [main में promote करना](#main-में-promote-करना)), factory:
+
+1. नए `main` commit की pipeline ढूँढती है;
+2. `build` stage के jobs पूरे होने तक इंतज़ार करती है, ताकि commit की images मौजूद हों;
+3. deploy job चलाती है और उसे follow करती है;
+4. Promote हुए task पर और notification channels में परिणाम बताती है (`deploy_started`, `deploy_succeeded`, `deploy_failed`, job log के अंत के साथ);
+5. सफल deploy के बाद stand tester शुरू करती है।
+
+Image build विफल होने पर deploy job चलाए बिना deploy रुक जाता है। GitLab से पहले से शुरू हुए deploy job को follow किया जाता है, दोबारा शुरू नहीं किया जाता। एक deploy चलते समय नया merge उसके पूरा होने तक इंतज़ार करता है। **"main डिप्लॉय करें"** बटन और `POST /api/projects/{id}/deploy` owner के अनुरोध पर `main` की वर्तमान tip deploy करते हैं। कोई automatic rollback नहीं है; विफल release को कैसे संभालना है, यह job स्वयं तय करता है।
 
 ## API और डेटा
 

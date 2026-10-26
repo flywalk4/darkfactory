@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import secrets
 import select
 import shutil
@@ -119,8 +120,17 @@ class StdioUpstream:
         hand_over(self.home, uid=MCP_UID)
         env["HOME"] = self.home
         env.update(config.get("env") or {})
+        # `${HTTPS_PROXY}` in an argument: a browser takes the task's egress proxy only as a flag.
+        args = [
+            re.sub(
+                r"\$\{(\w+)\}",
+                lambda m: env.get(m.group(1), "") if m.group(1) in SAFE_ENV else m.group(0),
+                arg,
+            )
+            for arg in config.get("args", [])
+        ]
         self.process = subprocess.Popen(
-            [config["command"], *config.get("args", [])],
+            [config["command"], *args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
