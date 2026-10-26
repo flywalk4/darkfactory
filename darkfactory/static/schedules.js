@@ -3,6 +3,30 @@ const scheduleKinds={stand_qa:tr('Тестирование стенда'),backlo
 const schedulePresets=[['0 * * * *',tr('Каждый час')],['0 */4 * * *',tr('Каждые 4 часа')],['0 9 * * *',tr('Каждый день в 9:00')],['0 9 * * 1-5',tr('По будням в 9:00')],['0 22 * * *',tr('Каждую ночь в 22:00')],['0 9 * * 1',tr('По понедельникам в 9:00')]];
 const scheduleTime=at=>at?new Date(at*1000).toLocaleString(LOCALE,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
 const browserZone=()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}catch(_){return 'UTC';}};
+const syncStates={merged:tr('влиты новые коммиты'),up_to_date:tr('изменений нет'),conflict:tr('конфликт — создана задача'),failed:tr('ошибка')};
+function jobLine(kind,job){
+  if(!job)return '';
+  const line=(text,cls='')=>`<small class="schedule-job ${cls}">${text}</small>`;
+  if(kind==='stand_qa'){
+    if(job.running)return line(tr('Идёт тестирование стенда с {time}: агент проходит сценарии в браузере, найденные дефекты появятся задачами на доске.',{time:esc(scheduleTime(job.running))}),'busy');
+    if(job.requested)return line(tr('В очереди: тестирование начнётся, как только освободится подписка.'),'busy');
+    if(!job.at)return '';
+    if(job.error)return line(tr('Прошлый прогон {time} не удался: {error}',{time:esc(scheduleTime(job.at)),error:esc(job.error)}),'bad');
+    const tasks=(job.tasks||[]).map(t=>`<button class="schedule-chip" data-schedule-task="${t.id}"><span class="subtask-dot state-${esc(t.state)}"></span>${esc(t.title)}</button>`).join('');
+    return line(tr('Прошлый прогон {time}: задач по дефектам — {n}.',{time:esc(scheduleTime(job.at)),n:job.found||0})+(job.summary?' '+esc(job.summary):''))+(tasks?`<div class="schedule-chips">${tasks}</div>`:'');
+  }
+  if(kind==='backlog'){
+    if(job.requested)return line(tr('Агент группирует заметки в задачи…'),'busy');
+    if(!job.at)return '';
+    return job.error?line(tr('Прошлый разбор {time} не удался: {error}',{time:esc(scheduleTime(job.at)),error:esc(job.error)}),'bad'):line(tr('Прошлый разбор {time}: создано задач — {n}.',{time:esc(scheduleTime(job.at)),n:job.found||0}));
+  }
+  if(kind==='main_sync'){
+    if(job.requested)return line(tr('В очереди: синхронизация начнётся в течение минуты.'),'busy');
+    if(!job.at)return '';
+    return line(tr('Последняя синхронизация {time}: {state}',{time:esc(scheduleTime(job.at)),state:esc(syncStates[job.state]||job.state||'')})+(job.error?' · '+esc(job.error):''),job.error?'bad':'');
+  }
+  return '';
+}
 function cronLabel(cron){const preset=schedulePresets.find(([value])=>value===cron);return preset?preset[1]:cron;}
 function scheduleForm(schedule){
   const kinds=Object.entries(scheduleKinds);
@@ -29,7 +53,7 @@ async function schedulesPage(){
   const owner=currentUser.role==='owner'&&currentUser.token_role==='owner',operator=owner||(currentUser.role!=='observer'&&currentUser.token_role!=='observer');
   window.scheduleKindTitles=data.kinds;
   root.innerHTML=`<div class="page-title"><div><div class="eyebrow">${tr('РАСПИСАНИЕ')}</div><h1>${tr('Регулярные работы проекта')}</h1><p>${tr('Тестирование стенда, разбор бэклога, синхронизация main и любые повторяющиеся задачи — по расписанию cron.')}</p></div><div>${owner?`<button id="schedule-add">${tr('+ Расписание')}</button>`:''}</div></div>
-  <section class="backlog-section">${data.items.length?data.items.map(s=>{const builtin=s.title===data.kinds[s.kind];return `<div class="backlog-item schedule-item ${s.enabled?'':'off'}"><div class="schedule-main"><strong>${esc(builtin?scheduleKinds[s.kind]:s.title)}</strong><small>${builtin?'':esc(scheduleKinds[s.kind]||s.kind)+' · '}<code>${esc(s.cron)}</code>${cronLabel(s.cron)!==s.cron?' · '+esc(cronLabel(s.cron)):''} · ${esc(s.timezone)}</small><small>${s.enabled?tr('Следующий запуск: {time}',{time:esc(scheduleTime(s.next_at))}):tr('Выключено')}${s.last_at?' · '+tr('прошлый: {time}',{time:esc(scheduleTime(s.last_at))}):''}</small>${s.last_result?`<small class="schedule-result">${esc(s.last_result)}</small>`:''}${s.kind==='task'&&s.request?`<p>${esc(s.request.slice(0,300))}</p>`:''}</div><div class="backlog-meta">${s.last_task_id?`<button class="quiet" data-schedule-task="${s.last_task_id}">${tr('Задача')}</button>`:''}${operator?`<button class="quiet" data-schedule-run="${s.id}">${tr('Запустить сейчас')}</button>`:''}${owner?`<button class="quiet" data-schedule-edit="${s.id}">${tr('Изменить')}</button><button class="quiet" data-schedule-delete="${s.id}" title="${tr('Удалить расписание')}">✕</button>`:''}</div></div>`;}).join(''):'<p class="backlog-empty">'+tr('Расписаний нет.')+'</p>'}</section>`;
+  <section class="backlog-section">${data.items.length?data.items.map(s=>{const builtin=s.title===data.kinds[s.kind];return `<div class="backlog-item schedule-item ${s.enabled?'':'off'}"><div class="schedule-main"><strong>${esc(builtin?scheduleKinds[s.kind]:s.title)}</strong><small>${builtin?'':esc(scheduleKinds[s.kind]||s.kind)+' · '}<code>${esc(s.cron)}</code>${cronLabel(s.cron)!==s.cron?' · '+esc(cronLabel(s.cron)):''} · ${esc(s.timezone)}</small><small>${s.enabled?tr('Следующий запуск: {time}',{time:esc(scheduleTime(s.next_at))}):tr('Выключено')}${s.last_at?' · '+tr('прошлый: {time}',{time:esc(scheduleTime(s.last_at))}):''}</small>${s.last_result&&!s.queued?`<small class="schedule-result">${esc(s.last_result)}</small>`:''}${jobLine(s.kind,data.jobs?.[s.kind])}${s.kind==='task'&&s.request?`<p>${esc(s.request.slice(0,300))}</p>`:''}</div><div class="backlog-meta">${s.last_task_id?`<button class="quiet" data-schedule-task="${s.last_task_id}">${tr('Задача')}</button>`:''}${operator?`<button class="quiet" data-schedule-run="${s.id}">${tr('Запустить сейчас')}</button>`:''}${owner?`<button class="quiet" data-schedule-edit="${s.id}">${tr('Изменить')}</button><button class="quiet" data-schedule-delete="${s.id}" title="${tr('Удалить расписание')}">✕</button>`:''}</div></div>`;}).join(''):'<p class="backlog-empty">'+tr('Расписаний нет.')+'</p>'}</section>`;
   if($('#schedule-add'))$('#schedule-add').onclick=()=>scheduleForm(null);
   root.querySelectorAll('[data-schedule-edit]').forEach(b=>b.onclick=()=>scheduleForm(data.items.find(s=>s.id===b.dataset.scheduleEdit)));
   root.querySelectorAll('[data-schedule-run]').forEach(b=>b.onclick=async()=>{try{const result=await api(`/schedules/${b.dataset.scheduleRun}/run`,'POST');toast(result.last_result||tr('Запущено'));await schedulesPage();}catch(e){toast(e.message);}});

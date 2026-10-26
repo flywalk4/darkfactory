@@ -28,6 +28,12 @@ TITLES = {
     "task": "Задача",
 }
 CLOSED = {"merged", "cancelled", "duplicate", "checked"}
+# A job handed over to its own worker loop: its progress shows in `jobs`, not in this text.
+QUEUED = {
+    "stand_qa": "Тестирование стенда поставлено в очередь",
+    "backlog": "Бэклог поставлен в очередь",
+    "main_sync": "Синхронизация main поставлена в очередь",
+}
 CHECK_EVERY = 30
 # Field ranges of a five-field cron line: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
 FIELDS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
@@ -191,7 +197,7 @@ def fire(db, schedule):
         if len(standqa.open_bugs(db, project)) >= standqa.MAX_OPEN:
             return f"Пропущено: открыто {standqa.MAX_OPEN}+ дефектов стенда"
         standqa.request(db, project, "schedule")
-        return "Тестирование стенда поставлено в очередь"
+        return QUEUED["stand_qa"]
     if schedule.kind == "backlog":
         if not db.scalar(
             select(backlog.BacklogItem.id).where(
@@ -200,10 +206,10 @@ def fire(db, schedule):
         ):
             return "Новых заметок нет"
         backlog.request(db, project)
-        return "Бэклог поставлен в очередь"
+        return QUEUED["backlog"]
     if schedule.kind == "main_sync":
         project.health = {**(project.health or {}), "main_sync_requested": now()}
-        return "Синхронизация main поставлена в очередь"
+        return QUEUED["main_sync"]
     previous = db.get(Task, schedule.last_task_id or "")
     if previous and previous.state not in CLOSED:
         return f"Пропущено: прошлая задача {previous.id} ещё не закончена"
@@ -256,6 +262,40 @@ def tick(force=False):
     return fired
 
 
+def jobs(db, project):
+    """What each kind of job is doing now and what its last run gave, for the schedules page: a stand run or
+    a backlog grouping is not a task on the board, so the page is where the owner sees it."""
+    from . import backlog, standqa
+
+    health = project.health or {}
+    qa = standqa.state(project)
+    tasks = [db.get(Task, ident) for ident in qa.get("task_ids") or []]
+    grouping = backlog.state(project)
+    return {
+        "stand_qa": {
+            "running": qa.get("running"),
+            "requested": qa.get("requested"),
+            "at": qa.get("at"),
+            "error": qa.get("error"),
+            "summary": qa.get("summary"),
+            "found": qa.get("tasks"),
+            "tasks": [{"id": task.id, "title": task.title, "state": task.state} for task in tasks if task],
+        },
+        "backlog": {
+            "requested": grouping.get("requested"),
+            "at": grouping.get("at"),
+            "error": grouping.get("error"),
+            "found": grouping.get("tasks"),
+        },
+        "main_sync": {
+            "requested": health.get("main_sync_requested"),
+            "at": health.get("main_sync_at"),
+            "state": (health.get("main_sync") or {}).get("state"),
+            "error": (health.get("main_sync") or {}).get("error"),
+        },
+    }
+
+
 def view(schedule):
     return {
         "id": schedule.id,
@@ -270,6 +310,7 @@ def view(schedule):
         "next_at": schedule.next_at,
         "last_at": schedule.last_at,
         "last_result": schedule.last_result,
+        "queued": schedule.last_result == QUEUED.get(schedule.kind),
         "last_task_id": schedule.last_task_id,
     }
 

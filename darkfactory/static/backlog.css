@@ -21,3 +21,5 @@ button.backlog-task:hover{background:#1a2333;filter:none}.backlog-task span:nth-
 .schedule-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}.schedule-main strong{font-size:13px;color:#dde3ee}.schedule-main code{font-size:11px}.schedule-main p{font-size:12px;margin-top:4px}
 .schedule-item.off{opacity:.55}.schedule-result{color:#b6c8ee}
 @media(max-width:700px){#schedules-view .page-title{flex-direction:column;align-items:stretch;gap:14px}}
+.schedule-job{color:var(--muted);line-height:1.5}.schedule-job.busy{color:#b6c8ee}.schedule-job.bad{color:#f1988d}
+.schedule-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}.schedule-chip{display:inline-flex;align-items:center;gap:6px;background:#111823;border:1px solid #293347;color:#dde3ee;font-size:11px;padding:4px 8px;border-radius:5px;white-space:normal;text-align:left}

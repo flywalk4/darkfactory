@@ -218,3 +218,24 @@ def test_deploy_during_a_run_gets_its_own_run(client, setup_project):
     second = StandAgent(report())
     assert standqa.run(second)
     assert not standqa.run(second)
+
+
+def test_schedules_page_shows_the_stand_run_and_its_tasks(client, setup_project):
+    project, pool = setup_project
+    connect(client, pool)
+    configure(client, project)
+    items = client.get(f"/api/projects/{project['id']}/schedules").json()["items"]
+    tester_schedule = next(item for item in items if item["kind"] == "stand_qa")
+    started = client.post(f"/api/schedules/{tester_schedule['id']}/run").json()
+    assert started["queued"]
+    page = client.get(f"/api/projects/{project['id']}/schedules").json()
+    assert page["jobs"]["stand_qa"]["requested"] and not page["jobs"]["stand_qa"]["running"]
+
+    def seen_running():
+        running = client.get(f"/api/projects/{project['id']}/schedules").json()["jobs"]["stand_qa"]
+        assert running["running"]
+
+    assert standqa.run(StandAgent(report(bug("Вход падает с 500")), during=seen_running))
+    job = client.get(f"/api/projects/{project['id']}/schedules").json()["jobs"]["stand_qa"]
+    assert not job["running"] and not job["requested"] and job["found"] == 1
+    assert [task["title"] for task in job["tasks"]] == ["Вход падает с 500"]

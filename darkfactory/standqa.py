@@ -515,6 +515,7 @@ def run(executor=None):
             at=now(),
             error=None,
             tasks=len(created),
+            task_ids=created,
             summary=report.summary[:2000],
             checked=report.checked[:30],
         )

@@ -56,6 +56,7 @@ def schedule_list(project_id: str, a=Depends(access)):
         )
         return {
             "items": [schedules.view(row) for row in rows],
+            "jobs": schedules.jobs(db, project),
             "kinds": schedules.TITLES,
             "timezone": schedules.default_timezone(),
         }
