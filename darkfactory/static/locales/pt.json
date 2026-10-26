@@ -1024,5 +1024,9 @@
  "Файл больше 200 КБ": "O arquivo é maior que 200 KB",
  "Убрать файл": "Remover arquivo",
  "Приложить файл": "Anexar arquivo",
- "Приложить картинку, .txt или .json (или вставь Ctrl/Cmd+V)": "Anexar uma imagem, .txt ou .json (ou colar com Ctrl/Cmd+V)"
+ "Приложить картинку, .txt или .json (или вставь Ctrl/Cmd+V)": "Anexar uma imagem, .txt ou .json (ou colar com Ctrl/Cmd+V)",
+ "Этот проект — сама фабрика": "Este projeto é a própria fábrica",
+ "Отчёт о сбоях фабрики": "Relatório de falhas da fábrica",
+ "Отчёт о сбоях фабрики поставлен в очередь": "Relatório de falhas da fábrica na fila",
+ "Последний отчёт {time}: заметок — {n}.": "Último relatório {time}: notas — {n}."
 }

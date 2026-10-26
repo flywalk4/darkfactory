@@ -1024,5 +1024,9 @@
  "Файл больше 200 КБ": "File is larger than 200 KB",
  "Убрать файл": "Remove file",
  "Приложить файл": "Attach a file",
- "Приложить картинку, .txt или .json (или вставь Ctrl/Cmd+V)": "Attach an image, .txt or .json (or paste with Ctrl/Cmd+V)"
+ "Приложить картинку, .txt или .json (или вставь Ctrl/Cmd+V)": "Attach an image, .txt or .json (or paste with Ctrl/Cmd+V)",
+ "Этот проект — сама фабрика": "This project is the factory",
+ "Отчёт о сбоях фабрики": "Factory failure report",
+ "Отчёт о сбоях фабрики поставлен в очередь": "Factory failure report queued",
+ "Последний отчёт {time}: заметок — {n}.": "Last report {time}: notes — {n}."
 }

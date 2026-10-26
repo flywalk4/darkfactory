@@ -20,8 +20,9 @@ from .db import Base, Project, Task, decrypt, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
-KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "task")
+KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "self_report", "task")
 TITLES = {
+    "self_report": "Отчёт о сбоях фабрики",
     "stand_qa": "Тестирование стенда",
     "stand_build": "Сборка приложения на стенде",
     "backlog": "Бэклог в задачи",
@@ -32,6 +33,7 @@ TITLES = {
 CLOSED = {"merged", "cancelled", "duplicate", "checked"}
 # A job handed over to its own worker loop: its progress shows in `jobs`, not in this text.
 QUEUED = {
+    "self_report": "Отчёт о сбоях фабрики поставлен в очередь",
     "stand_qa": "Тестирование стенда поставлено в очередь",
     "stand_build": "Сборка приложения на стенде поставлена в очередь",
     "backlog": "Бэклог поставлен в очередь",
@@ -224,6 +226,12 @@ def fire(db, schedule):
             return "Автоперенос выключен в настройках проекта"
         promotions.auto_request(db, project)
         return QUEUED["auto_promote"]
+    if schedule.kind == "self_report":
+        from . import selfreport
+
+        if not selfreport.request(db, project):
+            return "Проект не отмечен как фабрика"
+        return QUEUED["self_report"]
     if schedule.kind == "main_sync":
         project.health = {**(project.health or {}), "main_sync_requested": now()}
         return QUEUED["main_sync"]
@@ -304,6 +312,11 @@ def jobs(db, project):
             "at": grouping.get("at"),
             "error": grouping.get("error"),
             "found": grouping.get("tasks"),
+        },
+        "self_report": {
+            key: value
+            for key, value in (health.get("self_report") or {}).items()
+            if key in {"requested", "at", "found"}
         },
         "auto_promote": {
             "requested": (health.get("auto_promote") or {}).get("requested"),

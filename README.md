@@ -552,9 +552,12 @@ The **"Schedules"** page of a project lists its recurring jobs. Each schedule ha
 | Build an app on the stand | asks the tester for a [stand build](#stand-builds) |
 | Backlog into tasks | groups the open backlog notes into tasks; nothing happens without new notes |
 | Merge main into preprod | [syncs `main` into `preprod`](#syncing-main-back-into-preprod) |
+| Factory failure report (`self_report`) | queues a background scan of failures across the organization into the backlog of a project marked **This project is the factory** (`factory_self`) |
 | Task | creates an ordinary task with the saved title, request and priority; skipped while the task of the previous run is still open |
 
 A new project gets an hourly main sync and a backlog run every 4 hours; the stand tester schedule appears when a stand address is set. Projects connected earlier get the same schedules from their old interval settings once. After a factory outage the missed runs of a schedule collapse into one. `DARKFACTORY_TIMEZONE` sets the default time zone (UTC); the form offers the browser's.
+
+The factory report scans failures since its previous run: escalations, repeated reviews, environment and network blocks, stall restarts, execution errors, stand QA and deploy errors, worker background exceptions, and failed or rolled-back self-updates. It groups normalized reasons across projects, keeps occurrence counts, and creates a note after two occurrences (immediately for a failed or rolled-back self-update). Notes are scrubbed of addresses, tokens, the factory project’s `TEST_LEAK_PATTERNS`, and other project names. A fingerprint stays suppressed while its note or linked task is open. Projects without `factory_self` receive no reports. Worker errors are stored in a rotating `system/errors.jsonl` journal under the data root.
 
 API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
 
