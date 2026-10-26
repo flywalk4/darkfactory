@@ -282,7 +282,8 @@ def to_verify(db, project):
 
 
 def due(db, project):
-    if not stand(project):
+    # A held factory (an update in progress) starts no new browser runs.
+    if not stand(project) or service.held():
         return False
     return bool(state(project).get("requested"))
 

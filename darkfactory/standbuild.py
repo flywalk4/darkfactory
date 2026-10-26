@@ -180,7 +180,7 @@ def request(db, project, reason):
 
 
 def due(project):
-    return bool(stand(project) and state(project).get("requested"))
+    return bool(stand(project) and state(project).get("requested")) and not service.held()
 
 
 def prompt(db, project, current, task_text):
