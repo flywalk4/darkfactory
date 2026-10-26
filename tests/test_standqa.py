@@ -9,9 +9,10 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
 
 class StandAgent:
-    def __init__(self, report):
+    def __init__(self, report, during=None):
         self.report = report
         self.calls = []
+        self.during = during
 
     def run(
         self, task, project, connection, role, heartbeat, timeout, *, prompt_override=None, output_schema=None
@@ -21,6 +22,8 @@ class StandAgent:
         run.mkdir(parents=True, exist_ok=True)
         (run / "execution.json").write_text("{}")
         (run / "login-error.png").write_bytes(PNG)
+        if self.during:
+            self.during()
         if isinstance(self.report, Exception):
             raise self.report
         return {"status": "ok", "text": json.dumps(self.report)}
@@ -191,3 +194,19 @@ def test_tester_profile_reaches_only_the_stand_through_the_task_proxy(client, se
     )
     assert refused.status_code == 400
     assert client.post(f"/api/projects/{project['id']}/qa").status_code == 409
+
+
+def test_deploy_during_a_run_gets_its_own_run(client, setup_project):
+    project, pool = setup_project
+    connect(client, pool)
+    configure(client, project, qa_hours=0)
+    client.post(f"/api/projects/{project['id']}/qa")
+
+    def deployed():
+        with db.transaction() as session:
+            standqa.request(session, session.get(db.Project, project["id"]), "deploy", sha="c" * 40)
+
+    assert standqa.run(StandAgent(report(), during=deployed))
+    second = StandAgent(report())
+    assert standqa.run(second)
+    assert not standqa.run(second)

@@ -447,9 +447,14 @@ def create(db, project, report, run, probe_id):
 
 
 def finish(db, project, **fields):
+    current = state(project)
+    # A request made during the run (a deploy finished meanwhile) is not answered by it: keep it for the next.
+    dropped = {"running"} | (
+        {"requested"} if current.get("requested", 0) <= current.get("running", 0) else set()
+    )
     project.health = {
         **(project.health or {}),
-        "qa": {**{k: v for k, v in state(project).items() if k not in {"requested", "running"}}, **fields},
+        "qa": {**{k: v for k, v in current.items() if k not in dropped}, **fields},
     }
 
 
@@ -485,6 +490,7 @@ def run(executor=None):
             return False  # Retry on a later tick once a subscription is free.
         text = prompt(db, project, current)
         project.health = {**(project.health or {}), "qa": {**current, "running": now()}}
+        db.flush()  # Expunged below: the change must reach the database before that.
         project_id = project.id
         db.expunge(project)
         db.expunge(connection)
