@@ -200,9 +200,7 @@ def prompt(db, project, current, task_text):
         task=task_text,
         limit=max_tasks(project),
         known=(
-            "\nKnown problems (do not report again):\n"
-            + "\n".join(known_line(t) for t in known[:40])
-            + "\n"
+            "\nKnown problems (do not report again):\n" + "\n".join(known_line(t) for t in known[:40]) + "\n"
             if known
             else ""
         ),

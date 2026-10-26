@@ -263,9 +263,9 @@ def delegation_allowed(config, task):
 
 
 WRITER_NOTE = (
-    "\nYou are the writer of this task. Any read-only wording above describes the role's planning and review "
-    "work: here you must create or change the files the task requires, including reports and documents, in "
-    "/workspace. The factory commits them; an empty change fails review.\n"
+    "\nYou are the writer: read-only wording above applies to planning and review only. "
+    "Create or change the files the task requires (reports and docs too) in /workspace; "
+    "the factory commits them, an empty change fails review.\n"
 )
 
 
@@ -295,7 +295,7 @@ def mcp_prompt(profile):
     if not servers:
         return ""
     return (
-        "\nMCP servers connected to this session (call their tools directly; `codex mcp list` and MCP resource listings do not show them):\n"
+        "\nMCP servers connected (call their tools directly; `codex mcp list` does not show them):\n"
         + "".join(
             f"- {server['name']} ({'read-only' if server['read_only'] else 'read-write'}): "
             + ", ".join(server["enabled_tools"][:12])

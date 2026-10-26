@@ -528,6 +528,8 @@ def test_writer_session_reviews_itself_then_fixes_failing_checks(tmp_path, monke
     from darkfactory import runner
 
     monkeypatch.setattr(runner, "note", runner.Transcript(None))
+    # The routine-change shortcut reads the real workspace diff; this test needs the full review turn.
+    monkeypatch.setattr(runner, "routine_workspace", lambda: False)
     flag = tmp_path / "fixed"
     followups = runner.Followups({"self_review": True, "inner_checks": [f"test -f {flag}"]})
     assert followups.next() == runner.SELF_REVIEW
