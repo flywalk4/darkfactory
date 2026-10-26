@@ -1,0 +1,10 @@
+[Unit]
+Description=Check origin/main for a new Darkfactory version every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=darkfactory-update.service
+
+[Install]
+WantedBy=timers.target

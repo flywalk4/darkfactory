@@ -424,7 +424,21 @@ For employees, set a factory address reachable by them through `DARKFACTORY_PUBL
 When a top-level task completes, the notification also contains a **"Merge to main / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current `main` (up to 100,000 characters, with a truncation mark). The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
 
 > [!NOTE]
-> There is no automatic transfer to `main`; the Director cannot make this decision. A GitLab project with a deploy job deploys after the owner's merge ([below](#stand-testing-and-gitlab-deploys)). If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
+> By default there is no automatic transfer to `main`, and the Director cannot make this decision; see [Automatic promotion](#automatic-promotion) for the opt-in. A GitLab project with a deploy job deploys after the owner's merge ([below](#stand-testing-and-gitlab-deploys)). If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
+
+### Automatic promotion
+
+An owner can let a project promote itself: set **"Automatic promotion after a soak, hours"** (`auto_promote_hours`, `0` = only by hand) and add an **"Automatic promotion of preprod into main"** [schedule](#schedules). When the schedule fires, the newest accepted `preprod` goes to `main` only if:
+
+- it was accepted at least `auto_promote_hours` ago and no preprod incident happened since then;
+- the last preprod check is healthy and the usual promotion guards pass;
+- the [leak check](#leak-check) finds nothing in the `main..preprod` diff and its commit messages.
+
+The promotion is recorded as the factory's decision on the task, and a GitLab deploy job, if configured, follows. The schedule row shows why a run did not promote.
+
+### Leak check
+
+`scripts/leak_check.py` is meant for projects that live in a public repository. As a required check it fails a change that adds a credential (GitLab, GitHub, OpenAI/Anthropic, Slack and AWS keys, private keys, JWTs, bearer tokens, passwords in URLs or assignments) or one of the owner's own patterns to added lines, commit messages or file names. The owner's patterns (internal domains, addresses, logins) go into the project's test variable `TEST_LEAK_PATTERNS`, one per line or separated by `;`; they never enter the repository. The factory gives checks the task's base commit as `DARKFACTORY_CHECK_BASE`. The output names the rule and the line, never the value. A deliberate example stays with the marker `leak-check: allow` on its line.
 
 ### Syncing main back into preprod
 
@@ -559,6 +573,25 @@ State is stored in the named volumes PostgreSQL, `data` and `repos`. `data` hold
 ### Updating
 
 Update with `docker compose up -d --build`. So that tasks do not wait for the old worker to finish its current steps, update the worker through `scripts/deploy-worker.sh`: the new worker takes work immediately, the old one finishes what it started and stops. The current migrations add missing columns and preserve existing data. To roll back, restore the previous code/images and restart the services; the added columns can stay. Do not delete volumes during a regular update.
+
+### Self-update
+
+A server can follow `origin/main` by itself. `scripts/self-update.sh` runs from a systemd timer on the host, outside the containers, so a broken version is still rolled back:
+
+1. fetch `origin/main`; nothing new, or a commit that already failed: stop;
+2. hold new work (`/data/system/hold`), fast-forward the checkout, rebuild app and executor, restart the app and start a new worker through `scripts/deploy-worker.sh`;
+3. for up to 10 minutes wait for two minutes in a row of a responding app and a ticking scheduler (`/data/system/worker-heartbeat`) with no `Scheduler tick failed`;
+4. otherwise go back to the previous commit, rebuild and restart, and remember the bad commit until a newer one appears.
+
+Local edits or a rewritten `main` stop the update with an error instead of being overwritten. The result is in `/data/system/self-update.json` and on the factory page; the log is `/data/system/self-update.log`. Install:
+
+```sh
+cp scripts/systemd/darkfactory-update.* /etc/systemd/system/
+# set WorkingDirectory in darkfactory-update.service to this checkout
+systemctl daemon-reload && systemctl enable --now darkfactory-update.timer
+```
+
+Together with [automatic promotion](#automatic-promotion) a factory that develops its own repository ships its accepted changes to itself.
 
 ## Interface languages
 

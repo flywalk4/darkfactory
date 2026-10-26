@@ -20,11 +20,12 @@ from .db import Base, Project, Task, decrypt, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
-KINDS = ("stand_qa", "backlog", "main_sync", "task")
+KINDS = ("stand_qa", "backlog", "main_sync", "auto_promote", "task")
 TITLES = {
     "stand_qa": "Тестирование стенда",
     "backlog": "Бэклог в задачи",
     "main_sync": "Влить main в preprod",
+    "auto_promote": "Автоперенос preprod в main",
     "task": "Задача",
 }
 CLOSED = {"merged", "cancelled", "duplicate", "checked"}
@@ -33,6 +34,7 @@ QUEUED = {
     "stand_qa": "Тестирование стенда поставлено в очередь",
     "backlog": "Бэклог поставлен в очередь",
     "main_sync": "Синхронизация main поставлена в очередь",
+    "auto_promote": "Проверка автопереноса в main поставлена в очередь",
 }
 CHECK_EVERY = 30
 # Field ranges of a five-field cron line: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
@@ -207,6 +209,13 @@ def fire(db, schedule):
             return "Новых заметок нет"
         backlog.request(db, project)
         return QUEUED["backlog"]
+    if schedule.kind == "auto_promote":
+        from . import promotions
+
+        if not promotions.auto_hours(project):
+            return "Автоперенос выключен в настройках проекта"
+        promotions.auto_request(db, project)
+        return QUEUED["auto_promote"]
     if schedule.kind == "main_sync":
         project.health = {**(project.health or {}), "main_sync_requested": now()}
         return QUEUED["main_sync"]
@@ -286,6 +295,11 @@ def jobs(db, project):
             "at": grouping.get("at"),
             "error": grouping.get("error"),
             "found": grouping.get("tasks"),
+        },
+        "auto_promote": {
+            "requested": (health.get("auto_promote") or {}).get("requested"),
+            "at": (health.get("auto_promote") or {}).get("at"),
+            "result": (health.get("auto_promote") or {}).get("result"),
         },
         "main_sync": {
             "requested": health.get("main_sync_requested"),

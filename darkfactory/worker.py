@@ -9,6 +9,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 
 from sqlalchemy import func, select
 
@@ -22,6 +23,7 @@ from . import (
     initialization,
     logs,
     mainsync,
+    promotions,
     schedules,
     service,
     standqa,
@@ -1712,6 +1714,15 @@ def periodic(future, pool, job):
     return pool.submit(job)
 
 
+def heartbeat():
+    """The host's self-update script reads this to tell a live scheduler from a crashed one."""
+    try:
+        (ROOT / "system").mkdir(parents=True, exist_ok=True)
+        (ROOT / "system" / "worker-heartbeat").write_text(str(int(time.time())))
+    except OSError:
+        pass
+
+
 def drain_seconds():
     return max(0, int(os.getenv("DARKFACTORY_DRAIN_SECONDS", "900")))
 
@@ -1744,6 +1755,7 @@ def main():
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as syncs,
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as testers,
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as releases,
+        concurrent.futures.ThreadPoolExecutor(max_workers=1) as promoting,
     ):
         telegram = None
         grouping = None
@@ -1755,6 +1767,7 @@ def main():
         syncing = None
         testing = None
         releasing = None
+        promotion = None
         while not stopping.is_set():
             try:
                 futures = {f for f in futures if not f.done()}
@@ -1780,6 +1793,8 @@ def main():
                 if standqa.enabled():
                     testing = periodic(testing, testers, standqa.run)
                 releasing = periodic(releasing, releases, deploys.advance)
+                promotion = periodic(promotion, promoting, promotions.auto_promote)
+                heartbeat()
                 login = periodic(login, logins, advance_logins)
                 telegram = periodic(telegram, telegrams, listen_telegram)
                 delivery = periodic(delivery, notifications, exchange)

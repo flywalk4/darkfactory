@@ -131,3 +131,23 @@ def test_observer_cannot_change_schedules_and_deleting_project_removes_them(clie
     assert client.delete(f"/api/projects/{project['id']}").status_code == 200
     with db.Session() as session:
         assert not session.query(schedules.Schedule).filter_by(project_id=project["id"]).count()
+
+
+def test_auto_promote_schedule_needs_the_setting(client, setup_project):
+    project, _ = setup_project
+    base = f"/api/projects/{project['id']}/schedules"
+    schedule = client.post(base, json={"kind": "auto_promote", "cron": "0 * * * *"}).json()
+    assert "выключен" in client.post(f"/api/schedules/{schedule['id']}/run").json()["last_result"]
+    client.put(
+        f"/api/projects/{project['id']}",
+        json={
+            "name": "Pilot",
+            "remote": project["remote"],
+            "checks": project["checks"],
+            "auto_promote_hours": 6,
+        },
+    )
+    started = client.post(f"/api/schedules/{schedule['id']}/run").json()
+    assert started["queued"]
+    jobs = client.get(base).json()["jobs"]
+    assert jobs["auto_promote"]["requested"]

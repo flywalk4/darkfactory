@@ -120,6 +120,8 @@ class ProjectInput(BaseModel):
     qa_max_tasks: int = Field(default=standqa.MAX_TASKS, ge=1, le=10)
     qa_instructions: str | None = Field(default=None, max_length=8000)
     # GitLab only: the manual job the factory plays after the owner merges into main; empty turns deploys off.
+    # Hours an accepted preprod must hold before the factory promotes it to main on its own; 0 = owner only.
+    auto_promote_hours: int = Field(default=0, ge=0, le=720)
     deploy_job: str | None = Field(default=None, max_length=255, pattern=r"^[^\n\r]*$")
 
 
@@ -145,6 +147,7 @@ PROJECT_SECRETS = {
     "qa_max_tasks",
     "qa_instructions",
     "deploy_job",
+    "auto_promote_hours",
 }
 
 

@@ -1,3 +1,4 @@
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,6 +14,7 @@ from . import (
     service,
 )
 from .db import (
+    ROOT,
     Organization,
     Session,
     initialize,
@@ -76,7 +78,16 @@ def me(a=Depends(access)):
             "personal_mode": os.getenv("DARKFACTORY_PERSONAL_MODE") == "1",
             "disk": disk.public(),
             "held": service.held(),
+            "self_update": self_update(),
         }
+
+
+def self_update():
+    """What the host's scripts/self-update.sh last did; absent where the timer is not installed."""
+    try:
+        return json.loads((ROOT / "system" / "self-update.json").read_text())
+    except (OSError, ValueError):
+        return None
 
 
 @app.get("/api/executors")

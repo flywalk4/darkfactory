@@ -1,0 +1,12 @@
+[Unit]
+Description=Darkfactory self-update from origin/main
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Set to the checkout the factory runs from.
+WorkingDirectory=/opt/darkfactory
+ExecStart=/bin/sh scripts/self-update.sh
+# A build plus the health window and a possible rollback.
+TimeoutStartSec=3600

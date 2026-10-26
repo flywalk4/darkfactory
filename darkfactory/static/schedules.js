@@ -1,5 +1,5 @@
 // Schedules: recurring project jobs (stand testing, backlog, main sync, a task from a saved request) by cron.
-const scheduleKinds={stand_qa:tr('Тестирование стенда'),backlog:tr('Бэклог в задачи'),main_sync:tr('Влить main в preprod'),task:tr('Задача')};
+const scheduleKinds={stand_qa:tr('Тестирование стенда'),backlog:tr('Бэклог в задачи'),main_sync:tr('Влить main в preprod'),auto_promote:tr('Автоперенос preprod в main'),task:tr('Задача')};
 const schedulePresets=[['0 * * * *',tr('Каждый час')],['0 */4 * * *',tr('Каждые 4 часа')],['0 9 * * *',tr('Каждый день в 9:00')],['0 9 * * 1-5',tr('По будням в 9:00')],['0 22 * * *',tr('Каждую ночь в 22:00')],['0 9 * * 1',tr('По понедельникам в 9:00')]];
 const scheduleTime=at=>at?new Date(at*1000).toLocaleString(LOCALE,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
 const browserZone=()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}catch(_){return 'UTC';}};
@@ -19,6 +19,10 @@ function jobLine(kind,job){
     if(job.requested)return line(tr('Агент группирует заметки в задачи…'),'busy');
     if(!job.at)return '';
     return job.error?line(tr('Прошлый разбор {time} не удался: {error}',{time:esc(scheduleTime(job.at)),error:esc(job.error)}),'bad'):line(tr('Прошлый разбор {time}: создано задач — {n}.',{time:esc(scheduleTime(job.at)),n:job.found||0}));
+  }
+  if(kind==='auto_promote'){
+    if(job.requested)return line(tr('В очереди: проверка выдержки и перенос начнутся в течение минуты.'),'busy');
+    return job.at?line(tr('Прошлая проверка {time}: {result}',{time:esc(scheduleTime(job.at)),result:esc(job.result||'')})):'';
   }
   if(kind==='main_sync'){
     if(job.requested)return line(tr('В очереди: синхронизация начнётся в течение минуты.'),'busy');

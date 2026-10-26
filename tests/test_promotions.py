@@ -281,3 +281,69 @@ def test_preview_lists_the_tasks_the_promotion_carries(client, accepted):
 
         task = session.get(db.Task, item.task.id)
         assert promotions.included(session, task, preview["id"]) == []
+
+
+def soak(project_id, hours, healthy=True, age=None):
+    """Turn on auto-promotion, age the acceptance by `age` hours and set the preprod health."""
+    import json
+
+    from darkfactory.db import decrypt, encrypt
+
+    with db.transaction() as session:
+        row = session.get(db.Project, project_id)
+        config = json.loads(decrypt(row.secret) or "{}")
+        row.secret = encrypt(json.dumps({**config, "auto_promote_hours": hours}))
+        row.health = {**(row.health or {}), "state": "healthy" if healthy else "broken"}
+        if age is not None:
+            for item in session.query(db.Event).filter_by(kind="accepted"):
+                item.at = db.now() - age * 3600
+
+
+def auto_run(project_id):
+    from darkfactory import promotions
+
+    with db.transaction() as session:
+        promotions.auto_request(session, session.get(db.Project, project_id))
+    return dict(promotions.auto_promote(force=True))[project_id]
+
+
+def test_auto_promotion_waits_for_the_soak_and_a_healthy_preprod(client, accepted):
+    item = accepted
+    pid = item.project["id"]
+    assert "выключен" in auto_run(pid)
+    soak(pid, 6, age=1)
+    assert "Выдержка" in auto_run(pid)
+    soak(pid, 6, healthy=False, age=7)
+    assert "Preprod" in auto_run(pid)
+    with db.transaction() as session:
+        task = session.get(db.Task, item.task.id)
+        db.event(session, task, "incident_detected", "test incident")
+    soak(pid, 6, age=7)
+    assert "инцидент" in auto_run(pid)
+    with db.transaction() as session:
+        session.query(db.Event).filter_by(kind="incident_detected").update({"at": db.now() - 8 * 3600})
+    assert git(item.remote, "rev-parse", "main") == item.initial
+    result = auto_run(pid)
+    assert result.startswith("Перенесено в main"), result
+    assert git(item.remote, "rev-parse", "main") != item.initial
+    detail = client.get(f"/api/tasks/{item.task.id}").json()
+    assert detail["promotion"]["state"] == "merged" and detail["promotion"]["decided_by"] == "factory"
+    assert "Нечего переносить" in auto_run(pid)
+
+
+def test_auto_promotion_refuses_a_leak(client, accepted, monkeypatch):
+    item = accepted
+    pid = item.project["id"]
+    with db.transaction() as session:
+        import json
+
+        from darkfactory.db import decrypt, encrypt
+
+        row = session.get(db.Project, pid)
+        config = json.loads(decrypt(row.secret) or "{}")
+        # The deterministic writer's change sets VALUE = 42: treat that text as an internal name.
+        row.secret = encrypt(json.dumps({**config, "test_env": {"TEST_LEAK_PATTERNS": "VALUE = 42"}}))
+    soak(pid, 1, age=2)
+    result = auto_run(pid)
+    assert result.startswith("Не перенесено: проверка утечек"), result
+    assert git(item.remote, "rev-parse", "main") == item.initial
