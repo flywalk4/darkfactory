@@ -88,22 +88,60 @@ function renderBoard() {
   Object.values(childrenOf).forEach(list=>list.sort((a,b)=>a.created-b.created));
   // Subtasks live inside their parent card, but active ones also get their own card to watch them.
   const byId=Object.fromEntries(taskList.map(t=>[t.id,t])),active=t=>['running','recovering','needs_human','review_required'].includes(t.state);
-  const topLevel=taskList.filter(t=>!(t.parent_id&&ids.has(t.parent_id))||active(t));
+  const topLevel=taskList.filter(t=>(!(t.parent_id&&ids.has(t.parent_id))||active(t))&&shown(t));
   const waiting=t=>t.state.startsWith('waiting')||t.state==='queued';
   const queue=topLevel.filter(waiting).sort((a,b)=>Number(b.incident)-Number(a.incident) || taskPriorities.findIndex(([key])=>key===(a.priority||'normal'))-taskPriorities.findIndex(([key])=>key===(b.priority||'normal')) || a.created-b.created || a.id.localeCompare(b.id));
-  const groups=[[tr('К запуску'),queue],[tr('В работе'),topLevel.filter(t=>['running','recovering'].includes(t.state))],[tr('Нужно внимание'),topLevel.filter(t=>['needs_human','review_required'].includes(t.state))],[tr('Завершены'),topLevel.filter(t=>['merged','cancelled','duplicate','checked'].includes(t.state))]];
+  const groups=[[tr('К запуску'),queue],[tr('В работе'),topLevel.filter(t=>['running','recovering'].includes(t.state))],[tr('Нужно внимание'),topLevel.filter(t=>['needs_human','review_required'].includes(t.state))],[tr('Завершены'),topLevel.filter(t=>['merged','cancelled','duplicate','checked'].includes(t.state)).sort((a,b)=>b.updated-a.updated)]];
   // Summary answers "does anything need me?": live work, decisions, silent agents and subscription headroom.
   const stalled=taskList.filter(t=>activityLabel(t)?.stalled).length,poolWait=taskList.filter(t=>t.state==='waiting_pool').length;
   const ready=(boardConnections||[]).filter(c=>c.status==='ready'),left=ready.map(c=>c.quota_details?.remaining_percent).filter(Number.isFinite);
   const quota=boardConnections===null?'—':!ready.length?tr('нет'):left.length?Math.max(...left)+'%':'?';
   const counts=[[tr('В работе'),taskList.filter(t=>['running','recovering'].includes(t.state)).length,'●',''],[tr('Ждут решения'),taskList.filter(t=>['needs_human','review_required'].includes(t.state)).length,'◇',''],[tr('Зависли'),stalled,'⚠',stalled?'metric-alert':''],
     [tr('Квота'),quota,poolWait?tr('ждут: {n}',{n:poolWait}):tr('{n} подкл.',{n:ready.length}),poolWait||(boardConnections&&!ready.length)?'metric-alert':'']];
-  $('#metrics').innerHTML=counts.map(([label,count,note,cls])=>`<div class="metric ${cls}"><span>${label}</span><strong>${count}</strong><em>${note}</em></div>`).join('');$('#task-count').textContent=taskList.length;
+  $('#metrics').innerHTML=counts.map(([label,count,note,cls])=>`<div class="metric ${cls}"><span>${label}</span><strong>${count}</strong><em>${note}</em></div>`).join('');$('#task-count').textContent=topLevel.length===taskList.length?taskList.length:tr('{shown} из {total}',{shown:topLevel.length,total:taskList.length});renderBoardFilters();
   renderMainPending(taskList);
   renderAttention(taskList);
-  const card=t=>`<div class="card-group"><button class="card" data-task="${t.id}"><div class="card-id"><span>DF-${t.id.slice(0,6).toUpperCase()}</span><span>${t.incident?tr('ИНЦИДЕНТ'):'•••'}</span></div>${t.parent_id&&byId[t.parent_id]?`<span class="card-parent" role="link" tabindex="0" data-open-parent="${t.parent_id}" title="${tr('Открыть родительскую задачу')}">↖ ${esc(byId[t.parent_id].title)}</span>`:''}<h3>${esc(t.title)}</h3><span class="card-tag">${esc(stateLabel(t))}</span> <span class="card-tag task-priority-${esc(t.priority||'normal')}">${esc(priorityLabel(t.priority))}</span>${t.role_config?.tier==='light'?'<span class="tier-light" title="'+tr('Лёгкая подзадача: дешёвая модель, любая свободная подписка')+'">'+tr('лёгкая')+'</span>':''}${t.promotion_pending?'<span class="main-badge" title="'+tr('Слито в preprod, ждёт твоего решения о переносе в main')+'">→ main</span>':''}${t.reason?`<div class="card-reason">${esc(reasonLabel(t.reason))}</div>`:t.waiting_for?`<div class="card-reason">${esc(tr('Ждёт {name}',{name:t.waiting_for}))}</div>`:''}${t.branch&&t.state!=='done'?`<div class="card-branch" title="${tr('Ветка агента')}"><code>${esc(t.branch)}</code></div>`:''}${activityLabel(t)?`<div class="card-activity${activityLabel(t).stalled?' stalled':''}">${esc(activityLabel(t).text)}</div>`:''}<div class="card-bottom"><span class="agent">${esc(phases[t.phase]||t.phase)}</span><span>${tr('{n} мин · {count} исправл.',{n:Math.round(t.active_seconds/60),count:t.corrections})}</span></div></button>${childRows(t,childrenOf)}</div>`;
-  patchBoard(groups.map(([name,tasks])=>({title:`<i class="state-dot"></i>${name}<span class="count">${tasks.length}</span>`,cards:tasks.map(t=>[t.id,card(t)])})));
+  const card=t=>`<div class="card-group"><button class="card" data-task="${t.id}"><div class="card-id"><span>DF-${t.id.slice(0,6).toUpperCase()}</span><span class="card-author" title="${t.author?tr('Поставил(а): {name}',{name:esc(t.author)}):tr('Поставила фабрика')}">${t.incident?tr('ИНЦИДЕНТ')+' · ':''}${esc(t.author||tr('фабрика'))}</span></div>${t.parent_id&&byId[t.parent_id]?`<span class="card-parent" role="link" tabindex="0" data-open-parent="${t.parent_id}" title="${tr('Открыть родительскую задачу')}">↖ ${esc(byId[t.parent_id].title)}</span>`:''}<h3>${esc(t.title)}</h3><span class="card-tag">${esc(stateLabel(t))}</span> <span class="card-tag task-priority-${esc(t.priority||'normal')}">${esc(priorityLabel(t.priority))}</span>${t.role_config?.tier==='light'?'<span class="tier-light" title="'+tr('Лёгкая подзадача: дешёвая модель, любая свободная подписка')+'">'+tr('лёгкая')+'</span>':''}${t.promotion_pending?'<span class="main-badge" title="'+tr('Слито в preprod, ждёт твоего решения о переносе в main')+'">→ main</span>':''}${t.reason?`<div class="card-reason">${esc(reasonLabel(t.reason))}</div>`:t.waiting_for?`<div class="card-reason">${esc(tr('Ждёт {name}',{name:t.waiting_for}))}</div>`:''}${t.branch&&t.state!=='done'?`<div class="card-branch" title="${tr('Ветка агента')}"><code>${esc(t.branch)}</code></div>`:''}${activityLabel(t)?`<div class="card-activity${activityLabel(t).stalled?' stalled':''}">${esc(activityLabel(t).text)}</div>`:''}<div class="card-bottom"><span class="agent">${esc(phases[t.phase]||t.phase)}</span><span>${tr('{n} мин · {count} исправл.',{n:Math.round(t.active_seconds/60),count:t.corrections})}</span></div></button>${childRows(t,childrenOf)}</div>`;
+  const done=groups[3][1],cards=group=>group===groups[3]?doneCards(group[1],card):group[1].map(t=>[t.id,card(t)]);
+  patchBoard(groups.map(group=>({title:`<i class="state-dot"></i>${group[0]}<span class="count">${group[1].length}</span>`,cards:cards(group)})));
+  if(!done.length)doneLimit=DONE_PAGE;
 }
+// Finished work is split by day, newest first, and shown a page at a time so the column stays short.
+const DONE_PAGE=15;let doneLimit=DONE_PAGE;
+function dayLabel(seconds){
+  const day=new Date(seconds*1000),today=new Date();today.setHours(0,0,0,0);day.setHours(0,0,0,0);
+  const diff=Math.round((today-day)/86400000);
+  return diff===0?tr('Сегодня'):diff===1?tr('Вчера'):day.toLocaleDateString(LOCALE,{weekday:'short',day:'numeric',month:'long'});
+}
+function doneCards(tasks,card){
+  const rows=[],counts={};tasks.forEach(t=>{const label=dayLabel(t.updated);counts[label]=(counts[label]||0)+1;});
+  let last;
+  for(const t of tasks.slice(0,doneLimit)){
+    const label=dayLabel(t.updated);
+    if(label!==last){rows.push(['day:'+label,`<div class="day-divider"><span>${esc(label)}</span><span>${counts[label]}</span></div>`]);last=label;}
+    rows.push([t.id,card(t)]);
+  }
+  if(tasks.length>doneLimit)rows.push(['more',`<button class="show-more" data-more-done>${tr('Показать ещё {n} из {total}',{n:Math.min(DONE_PAGE,tasks.length-doneLimit),total:tasks.length-doneLimit})}</button>`]);
+  return rows;
+}
+// With many people on one factory the board narrows to one author or a search; the choice survives reloads.
+let boardAuthor=remembered('df-board-author'),boardSearch='';
+function shown(t){
+  if(boardAuthor==='me'&&t.created_by!==currentUser?.id)return false;
+  if(boardAuthor==='factory'&&t.created_by)return false;
+  if(boardAuthor&&!['me','factory'].includes(boardAuthor)&&t.created_by!==boardAuthor)return false;
+  const q=boardSearch.trim().toLowerCase();
+  return !q||t.title.toLowerCase().includes(q)||('df-'+t.id.slice(0,6)).includes(q)||(t.author||'').toLowerCase().includes(q);
+}
+function renderBoardFilters(){
+  const people=new Map();taskList.forEach(t=>{if(t.created_by&&t.created_by!==currentUser?.id)people.set(t.created_by,t.author||tr('Без имени'));});
+  if(boardAuthor&&!['me','factory'].includes(boardAuthor)&&!people.has(boardAuthor))people.set(boardAuthor,tr('Автор'));
+  const choices=[['',tr('Все авторы')],['me',tr('Мои задачи')],...[...people].sort((a,b)=>a[1].localeCompare(b[1],LOCALE)),['factory',tr('Фабрика (без автора)')]];
+  const html=choices.map(([v,t])=>`<option value="${esc(v)}" ${v===boardAuthor?'selected':''}>${esc(t)}</option>`).join('');
+  const select=$('#board-author');if(select.dataset.html!==html){select.innerHTML=html;select.dataset.html=html;}
+}
+$('#board-author').onchange=e=>{boardAuthor=e.target.value;remember('df-board-author',boardAuthor);doneLimit=DONE_PAGE;renderBoard();};
+$('#board-search').oninput=e=>{boardSearch=e.target.value;doneLimit=DONE_PAGE;renderBoard();};
 // The poll re-renders every few seconds: only cards whose markup changed are replaced, so focus,
 // scroll and hover survive. Clicks are delegated from #board, which is never rebuilt.
 const cardHtml=new WeakMap(),fromHtml=html=>{const template=document.createElement('template');template.innerHTML=html;return template.content.firstElementChild;};
@@ -126,6 +164,7 @@ function patchBoard(columns){
   });
 }
 $('#board').addEventListener('click',event=>{
+  if(event.target.closest('[data-more-done]')){doneLimit+=DONE_PAGE;renderBoard();return;}
   const parent=event.target.closest('[data-open-parent]'),toggle=event.target.closest('[data-subtasks]'),task=event.target.closest('[data-task]');
   if(parent){event.stopPropagation();showDetail(parent.dataset.openParent).catch(e=>toast(e.message));}
   else if(toggle){event.stopPropagation();const id=toggle.dataset.subtasks;openParents.has(id)?openParents.delete(id):openParents.add(id);renderBoard();}

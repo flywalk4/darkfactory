@@ -27,6 +27,7 @@ from ..db import (
     ArtifactVersion,
     Event,
     Link,
+    Principal,
     Project,
     Session,
     Task,
@@ -65,7 +66,7 @@ class TaskInput(BaseModel):
     attachments: list[AttachmentInput] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
 
-def new_task(db, project, value, incident=False):
+def new_task(db, project, value, incident=False, author=None):
     config = json.loads(decrypt(project.secret) or "{}")
     if not set(value.agent_profiles) <= {"planner", "writer", "reviewer"}:
         raise HTTPException(400, "Неизвестная роль агента")
@@ -115,6 +116,7 @@ def new_task(db, project, value, incident=False):
         project_id=project.id,
         branch=f"darkfactory/{ident}",
         incident=incident,
+        created_by=author,
     )
     db.add(task)
     db.flush()
@@ -134,7 +136,7 @@ def new_task(db, project, value, incident=False):
 def create_task(project_id: str, value: TaskInput, a=Depends(access)):
     a.require("operator")
     with transaction() as db:
-        return public(new_task(db, a.project(db, project_id), value))
+        return public(new_task(db, a.project(db, project_id), value, author=a.principal.id))
 
 
 @router.post("/api/projects/{project_id}/incidents", status_code=201)
@@ -144,7 +146,7 @@ def incident(project_id: str, value: TaskInput, a=Depends(access)):
         project = a.project(db, project_id)
         if project.incident_id:
             return public(db.get(Task, project.incident_id))
-        task = new_task(db, project, value, incident=True)
+        task = new_task(db, project, value, incident=True, author=a.principal.id)
         project.incident_id = task.id
         return public(task)
 
@@ -184,7 +186,7 @@ def waiting_for(task, files=None):
     return None
 
 
-def board_row(task, parent_id, pending, awaiting=(), files=None):
+def board_row(task, parent_id, pending, awaiting=(), files=None, authors=None):
     """The board card: everything but the full request, which only the task page needs."""
     row = public(task)
     request = row.pop("request") or ""
@@ -196,6 +198,7 @@ def board_row(task, parent_id, pending, awaiting=(), files=None):
         "promotion_pending": task.id in pending,
         "awaits_director": task.id in awaiting,
         "waiting_for": waiting_for(task, (files or {}).get(task.id)),
+        "author": (authors or {}).get(task.created_by),
     }
 
 
@@ -265,7 +268,11 @@ def tasks(
         files = held_files(
             db, [t.id for t in rows if t.state == "queued" and (t.role_config or {}).get("wait_files_until")]
         )
-    return [board_row(t, parents.get(t.id), pending, awaiting, files) for t in rows]
+        ids = {t.created_by for t in rows if t.created_by}
+        authors = (
+            {p.id: p.name for p in db.scalars(select(Principal).where(Principal.id.in_(ids)))} if ids else {}
+        )
+    return [board_row(t, parents.get(t.id), pending, awaiting, files, authors) for t in rows]
 
 
 def relations(db, task_id):

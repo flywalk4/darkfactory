@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Darkfactory</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css?v=20261028-i18n">
+  <title>Darkfactory</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css?v=20261029-board">
   <link rel="stylesheet" href="/static/agents.css"><link rel="stylesheet" href="/static/chat.css?v=20261022-images">
   <link rel="stylesheet" href="/static/registry.css"><link rel="stylesheet" href="/static/backlog.css?v=20261025-disk2"><link rel="stylesheet" href="/static/transcript.css?v=20261026-diff2"><link rel="stylesheet" href="/static/attach.css?v=20261022-attach">
 </head>
@@ -40,7 +40,7 @@
       <div id="disk-warning" class="disk-warning" hidden></div>
       <div id="attention" class="main-pending attention" hidden></div>
       <div id="main-pending" class="main-pending" hidden></div>
-      <div class="board-heading"><h2>Все задачи <span id="task-count">0</span></h2><div class="legend"><span class="dot"></span> Обновляется автоматически</div></div>
+      <div class="board-heading"><h2>Все задачи <span id="task-count">0</span></h2><div class="board-filters"><input id="board-search" type="search" placeholder="Поиск: название, DF-…, автор" aria-label="Поиск задач"><select id="board-author" aria-label="Автор задач"></select><div class="legend"><span class="dot"></span> Обновляется автоматически</div></div></div>
       <div id="empty" class="empty" hidden><div class="empty-symbol">↗</div><h2>Начни с проекта</h2><p data-i18n-html>Подключи Git-репозиторий и пул исполнителей.<br>Потом поставь первую задачу.</p><button id="empty-add">Подключить проект</button></div>
       <div id="board" class="board"></div>
     </section>
@@ -63,7 +63,7 @@
 <div id="toast" role="status" hidden></div>
 <script src="/static/i18n.js?v=20261026-i18n" defer></script>
 <script src="/static/attach.js?v=20261022-attach" defer></script>
-<script src="/static/app.js?v=20261028-factory" defer></script>
+<script src="/static/app.js?v=20261029-board" defer></script>
 <script src="/static/backlog.js?v=20261025-disk" defer></script>
 <script src="/static/registry.js?v=20261027-poll" defer></script>
 <script src="/static/promotions.js?v=20261028-included" defer></script>

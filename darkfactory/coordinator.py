@@ -85,6 +85,7 @@ def delegate(db, task, plan):
             request=f"Parent context only: {task.title}\n{task.request}\n\nImplement ONLY your bounded goal; do not duplicate sibling work:\n{item['request']}\n\nAcceptance criteria:\n{item['acceptance']}",
             branch="darkfactory/" + ident,
             explicit_api=task.explicit_api,
+            created_by=task.created_by,
             role_config=child_configs[item["key"]],
             plan_depth=task.plan_depth + 1,
             api_budget_usd=0,

@@ -168,6 +168,8 @@ class Task(Base):
     dependency_commits: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
     plan_depth: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     explicit_api: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Who asked for it; subtasks inherit it. Empty for work the factory started on its own.
+    created_by: Mapped[str | None] = mapped_column(String(32))
     idempotency_key: Mapped[str | None] = mapped_column(String(150))
     __table_args__ = (UniqueConstraint("project_id", "idempotency_key"),)
 
@@ -303,6 +305,7 @@ def expand_schema(conn):
             "dependency_commits": "JSON NOT NULL DEFAULT '{}'",
             "plan_depth": "INTEGER NOT NULL DEFAULT 0",
             "time_reserved_seconds": "FLOAT NOT NULL DEFAULT 0",
+            "created_by": "VARCHAR(32)",
         },
     }
     for table, columns in expansions.items():

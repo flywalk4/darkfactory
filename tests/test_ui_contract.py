@@ -73,3 +73,25 @@ def test_muted_review_notes_can_be_listed_and_removed(client, setup_project):
     assert shown["review_muted"] == ["Rename variables"]
     saved = client.put(f"/api/projects/{project['id']}", json={**shown, "review_muted": []}).json()
     assert saved["review_muted"] == []
+
+
+def test_board_names_who_asked_for_each_task(client, setup_project):
+    project, _ = setup_project
+    me = client.get("/api/me").json()
+    task = client.post(f"/api/projects/{project['id']}/tasks", json={"title": "Mine", "request": "r"}).json()
+    assert task["created_by"] == me["id"]
+    with db.transaction() as session:
+        session.add(
+            db.Task(
+                id="factory1",
+                project_id=project["id"],
+                org_id=me["org_id"],
+                title="Auto",
+                request="r",
+                branch="b",
+            )
+        )
+    board = {t["id"]: t for t in client.get(f"/api/projects/{project['id']}/tasks").json()}
+    assert board[task["id"]]["author"] == me["name"]
+    # Work the factory started itself has no author, and the board says so instead of guessing.
+    assert board["factory1"]["created_by"] is None and board["factory1"]["author"] is None
