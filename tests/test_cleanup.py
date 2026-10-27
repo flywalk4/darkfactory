@@ -33,6 +33,7 @@ def test_sweep_removes_old_finished_workspaces_and_merged_branches(
         session.get(db.Project, project["id"]).remote = str(remote)
     mirror = db.ROOT / "repositories" / (project["id"] + ".git")
     git(tmp_path, "clone", "-q", "--mirror", str(remote), str(mirror))
+    git(remote, "branch", "preprod", "main")
     git(remote, "branch", "darkfactory/old", "main")
     git(remote, "branch", "darkfactory/dropped", "main")
     merged, cancelled, fresh, waiting = (make_task(client, project)["id"] for _ in range(4))

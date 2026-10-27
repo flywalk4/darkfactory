@@ -117,6 +117,29 @@ services:
       PROXPI_CACHE_SIZE: ${PYPI_CACHE_BYTES:-10000000000}
     volumes:
       - pypi-cache:/cache
+    # proxpi runs one gunicorn worker; once it hung for hours and every pip install timed out. Compose does not
+    # restart an unhealthy container, so the third failed probe in a row stops gunicorn and restart brings it back.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os, urllib.request
+          path = "/tmp/health-failures"
+          try:
+              urllib.request.urlopen("http://localhost:5000/health", timeout=15)
+              failures = 0
+          except Exception:
+              failures = int(open(path).read() or 0) + 1 if os.path.exists(path) else 1
+          open(path, "w").write(str(failures % 3))
+          if failures >= 3:
+              os.kill(1, 15)
+          raise SystemExit(1 if failures else 0)
+      interval: 30s
+      timeout: 20s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
     networks: [control]
   executor-image:
