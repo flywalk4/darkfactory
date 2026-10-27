@@ -2,7 +2,7 @@ import pytest
 from conftest import connect, make_task
 from sqlalchemy import select
 
-from darkfactory import db, service
+from darkfactory import db, service, worker
 from darkfactory.runner import json_object
 from darkfactory.worker import Worker, correction
 
@@ -382,3 +382,30 @@ def test_finding_that_names_an_unmet_definition_of_done_item_rejects():
         "approved": True,
         "findings": ["[LATER] rename the helper"],
     }
+
+
+def test_release_hands_shared_lease_to_running_sibling(client, setup_project):
+    project, pool = setup_project
+    claude = connect(client, pool)
+    a, b = make_task(client, project), make_task(client, project)
+    with db.transaction() as session:
+        for value in (a, b):
+            task = session.get(db.Task, value["id"])
+            task.connection_id, task.state = claude["id"], "running"
+            task.lease_until = 4_000_000_000
+        connection = session.get(db.Connection, claude["id"])
+        connection.lease_task, connection.lease_until = a["id"], 4_000_000_000
+        worker.release(session, session.get(db.Task, a["id"]))
+        assert (connection.lease_task, connection.lease_until) == (b["id"], 4_000_000_000)
+        worker.release(session, session.get(db.Task, b["id"]))
+        assert (connection.lease_task, connection.lease_until) == (None, None)
+
+
+def test_charge_time_stops_at_deadline_and_never_goes_negative():
+    task = db.Task(heartbeat=1000, execution_deadline=1060, active_seconds=5, time_reserved_seconds=100)
+    worker.charge_time(task)
+    # Time past the deadline is not charged; the reservation shrinks by the charged part only.
+    assert (task.active_seconds, task.time_reserved_seconds) == (65, 40)
+    before = task.active_seconds
+    worker.charge_time(task)
+    assert task.active_seconds == before
