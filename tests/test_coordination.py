@@ -267,23 +267,13 @@ def test_shared_descendant_cap_counts_cousins_and_resume_does_not_create_more(cl
         assert len(service.execution_limits(session, root)["members"]) == 4
 
 
-@pytest.mark.parametrize("invalid", ["missing-profile", "write-mcp", "inherited-profile"])
+@pytest.mark.parametrize("invalid", ["missing-profile", "inherited-profile"])
 def test_invalid_profiles_validate_whole_batch_before_any_insert(client, setup_project, invalid):
     project, _ = setup_project
     parent = make_task(client, project)
     with db.transaction() as session:
         settings = role_settings()
         profile = "missing" if invalid == "missing-profile" else "developer"
-        if invalid == "write-mcp":
-            settings["mcp_servers"] = [
-                {
-                    "name": "writes",
-                    "url": "https://tools.example.invalid/mcp",
-                    "enabled_tools": ["write"],
-                    "read_only": False,
-                }
-            ]
-            settings["profiles"][2]["mcp_servers"] = ["writes"]
         save_roles(session, project["id"], settings)
         root = session.get(db.Task, parent["id"])
         if invalid == "inherited-profile":
@@ -302,6 +292,35 @@ def test_invalid_profiles_validate_whole_batch_before_any_insert(client, setup_p
         assert child_tasks(session, root) == {}
         assert session.query(db.Task).count() == 1
         assert session.query(db.Event).count() == before_events
+
+
+def test_write_mcp_profile_writes_and_project_planner_plans(client, setup_project):
+    project, _ = setup_project
+    parent = make_task(client, project)
+    with db.transaction() as session:
+        settings = role_settings()
+        settings["mcp_servers"] = [
+            {
+                "name": "writes",
+                "url": "https://tools.example.invalid/mcp",
+                "enabled_tools": ["write"],
+                "read_only": False,
+            }
+        ]
+        settings["profiles"][2]["mcp_servers"] = ["writes"]
+        save_roles(session, project["id"], settings)
+        root = session.get(db.Task, parent["id"])
+        root.role_config = {"profiles": {"planner": "analyst"}}
+        assert coordinator.delegate(
+            session, root, structured_plan(subtask("browser", "developer"), subtask("notes", "analyst"))
+        )
+        children = child_tasks(session, root)
+        assert children["browser"].role_config["profiles"] == {"writer": "developer"}
+        assert children["notes"].role_config["profiles"] == {"planner": "analyst", "writer": "analyst"}
+        config = {"agents": settings}
+        overrides = children["browser"].role_config["profiles"]
+        assert agents.resolve(config, "plan", overrides)["name"] == "manager"
+        assert agents.resolve(config, "implement", overrides)["name"] == "developer"
 
 
 def test_legacy_configuration_keeps_single_delegation_level(client, setup_project):
