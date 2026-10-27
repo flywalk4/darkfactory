@@ -65,7 +65,7 @@ function collapseNav(collapsed){document.body.classList.toggle('nav-collapsed',c
 $('#collapse-nav').onclick=()=>{const collapsed=!document.body.classList.contains('nav-collapsed');remember('df-nav-collapsed',collapsed?'1':'');collapseNav(collapsed);};collapseNav(remembered('df-nav-collapsed')==='1');
 $('#logout').onclick=()=>{sessionStorage.removeItem('df-token');location.reload();};
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{remember('df-view',button.dataset.view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));for(const view of ['board','factory','backlog','schedules','settings','agents','artifacts'])$('#'+view+'-view').hidden=button.dataset.view!==view;if(button.dataset.view==='settings') settings().catch(e=>toast(e.message));if(button.dataset.view==='agents')agentsPage().catch(e=>toast(e.message));if(button.dataset.view==='artifacts')registryPage().catch(e=>toast(e.message));if(button.dataset.view==='backlog')backlogPage().catch(e=>toast(e.message));if(button.dataset.view==='schedules')schedulesPage().catch(e=>toast(e.message));if(button.dataset.view==='factory')factoryPage().catch(e=>toast(e.message));});
-let loadSeq=0,renderedProjects='',pollTick=0;
+let loadSeq=0,renderedProjects='',pollTick=0,boardProject='';
 // Polls pass full=false: projects and pools are refetched only on explicit loads and every few ticks.
 async function load({full=true}={}) {
   const seq=++loadSeq;
@@ -78,6 +78,8 @@ async function load({full=true}={}) {
   const project=projects.find(p=>p.id===projectId);$('#current-project').textContent=project?.name||tr('Проекты');$('#project-heading').textContent=project?.name||tr('Твоя фабрика разработки');
   $('#project-description').textContent=project?`${project.remote} · preprod · ${project.checks.length ? tr('{n} обязательных проверок',{n:project.checks.length}) : project.merge_without_checks===false ? tr('в preprod сливает человек: нет проверок') : tr('в preprod автоматически после ревью')} · ${tr('{branch} — вручную',{branch:esc(project.seed_branch)})}`:tr('Подключи первый проект, чтобы начать работу.');
   $('#new-incident').disabled=$('#new-task').disabled=!project;$('#empty').hidden=!!project;$('#board').hidden=!project;$('#metrics').hidden=!project;$('.board-heading').hidden=!project;
+  // Switching projects empties the board at once, so old cards never sit under the new heading.
+  if(boardProject!==(project?.id||'')){boardProject=project?.id||'';taskList=[];renderBoard();}
   const [nextTasks,nextConnections]=project?await Promise.all([api(`/projects/${project.id}/tasks`),api('/connections').catch(()=>null)]):[[],null];
   if(seq!==loadSeq||projectId!==(project?.id||''))return;
   taskList=nextTasks;boardConnections=nextConnections;renderBoard();
