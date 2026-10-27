@@ -65,13 +65,13 @@ function collapseNav(collapsed){document.body.classList.toggle('nav-collapsed',c
 $('#collapse-nav').onclick=()=>{const collapsed=!document.body.classList.contains('nav-collapsed');remember('df-nav-collapsed',collapsed?'1':'');collapseNav(collapsed);};collapseNav(remembered('df-nav-collapsed')==='1');
 $('#logout').onclick=()=>{sessionStorage.removeItem('df-token');location.reload();};
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{remember('df-view',button.dataset.view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));for(const view of ['board','factory','backlog','schedules','settings','agents','artifacts'])$('#'+view+'-view').hidden=button.dataset.view!==view;if(button.dataset.view==='settings') settings().catch(e=>toast(e.message));if(button.dataset.view==='agents')agentsPage().catch(e=>toast(e.message));if(button.dataset.view==='artifacts')registryPage().catch(e=>toast(e.message));if(button.dataset.view==='backlog')backlogPage().catch(e=>toast(e.message));if(button.dataset.view==='schedules')schedulesPage().catch(e=>toast(e.message));if(button.dataset.view==='factory')factoryPage().catch(e=>toast(e.message));});
-let loadSeq=0,renderedProjects='',pollTick=0,boardProject='';
+let loadSeq=0,renderedProjects='',pollTick=0,boardProject='',poolsLoaded=false;
 // Every load refetches projects; project clicks reuse the loaded pools and polls refetch them every sixth tick.
-async function load({projects:withProjects=true,pools:withPools=true}={}) {
+async function load({pools:withPools=true}={}) {
   const seq=++loadSeq;
-  const [nextProjects,nextPools]=await Promise.all([withProjects||!projects.length?api('/projects'):projects,withPools||!projects.length?api('/pools'):poolList]);
+  const [nextProjects,nextPools]=await Promise.all([api('/projects'),withPools||!poolsLoaded?api('/pools'):poolList]);
   if(seq!==loadSeq)return;
-  projects=nextProjects;poolList=nextPools;
+  projects=nextProjects;poolList=nextPools;poolsLoaded=true;
   if(!projects.some(p=>p.id===projectId)) projectId=projects[0]?.id||'';remember('df-project',projectId);
   const projectsHtml=projects.map(p=>`<button class="project-item ${p.id===projectId?'selected':''}" data-project="${p.id}"><span class="project-icon">${esc((p.name.trim()[0]||'◆').toUpperCase())}</span><span class="nav-text">${esc(p.name)}</span></button>`).join('');
   if(projectsHtml!==renderedProjects){renderedProjects=projectsHtml;$('#project-list').innerHTML=projectsHtml;collapseNav(document.body.classList.contains('nav-collapsed'));document.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{projectId=b.dataset.project;document.querySelector('[data-view="board"]').click();load({pools:false}).catch(e=>toast(e.message));});}

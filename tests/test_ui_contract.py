@@ -122,6 +122,15 @@ const tick = () => new Promise(resolve => setTimeout(resolve));
 const ids = () => taskList.map(t => t.id);
 eval(body + `
 (async () => {
+  // With no projects yet, pools are fetched once and then reused by polls.
+  const realProjects = data['/projects'];
+  data['/projects'] = [];
+  await load();
+  calls.length = 0;
+  await load({pools: false});
+  const emptyPollCalls = calls.slice();
+  data['/projects'] = realProjects;
+  renders.length = 0;
   await load();
   const loadedA = {tasks: ids(), renders: renders.slice()};
   held.add('A');
@@ -144,7 +153,7 @@ eval(body + `
   held.clear();
   calls.length = 0;
   await load({pools: false});
-  console.log(JSON.stringify({loadedA, switchCalls, whileB, afterB, afterLateA, pollCalls: calls}));
+  console.log(JSON.stringify({emptyPollCalls, loadedA, switchCalls, whileB, afterB, afterLateA, pollCalls: calls}));
 })();`);
 """
 
@@ -158,6 +167,7 @@ def test_board_load_keeps_only_the_new_project_when_the_switch_happens_mid_reque
     run = subprocess.run(["node", str(harness), str(app)], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     result = json.loads(run.stdout)
+    assert result["emptyPollCalls"] == ["/projects"]
     assert result["loadedA"] == {"tasks": ["A1"], "renders": [[], ["A1"]]}
     # While B's tasks are in flight, project A's cards are already gone from the board.
     assert result["whileB"] == []
