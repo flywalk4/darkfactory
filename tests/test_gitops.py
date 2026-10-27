@@ -382,6 +382,30 @@ def test_publish_changed_tree_still_creates_forge_record(publish_repository, mon
     assert all(request.url.host == "forge.invalid" for request in calls)
 
 
+@pytest.mark.parametrize("forge_url", ["https://forge.invalid", "https://forge.invalid/api/v4/"])
+def test_gitlab_publish_calls_rest_api_for_web_server_url(publish_repository, monkeypatch, forge_url):
+    repo = publish_repository
+    repo.project.forge = "gitlab"
+    repo.project.forge_url = forge_url
+    (repo.work / "changed.txt").write_text("new implementation\n")
+    sha = repo.commit()
+    paths = []
+
+    def respond(request):
+        paths.append(request.url.raw_path.decode().split("?")[0])
+        assert request.headers["PRIVATE-TOKEN"] == repo.credentials.get("forge_token", "")
+        return gitops.httpx.Response(200, json=[{"web_url": "https://forge.invalid/mr/1"}])
+
+    real_client = gitops.httpx.Client
+    monkeypatch.setattr(
+        gitops.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=gitops.httpx.MockTransport(respond), **kwargs),
+    )
+    assert repo.publish(sha) == "https://forge.invalid/mr/1"
+    assert paths == ["/api/v4/projects/company%2Fproject/merge_requests"]
+
+
 @pytest.mark.parametrize("interrupt_phase", ["clone", "checkout"])
 def test_interrupted_initial_workspace_is_atomic_and_can_retry(
     publish_repository, repository_factory, monkeypatch, interrupt_phase

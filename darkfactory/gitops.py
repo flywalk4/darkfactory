@@ -18,6 +18,7 @@ import httpx
 
 from . import warm
 from .db import ROOT, decrypt
+from .deploys import gitlab_api
 
 log = logging.getLogger(__name__)
 
@@ -535,7 +536,7 @@ class Repository:
                 response.raise_for_status()
                 return response.json()["html_url"]
             headers = {"PRIVATE-TOKEN": token}
-            endpoint = base + "/projects/" + quote(repo, safe="") + "/merge_requests"
+            endpoint = gitlab_api(base) + "/projects/" + quote(repo, safe="") + "/merge_requests"
             response = client.get(
                 endpoint,
                 headers=headers,
