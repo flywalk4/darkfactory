@@ -432,7 +432,14 @@ def release(db, row):
 def heartbeat(identifier, owner):
     with transaction() as db:
         row = db.get(Dialogue, identifier)
-        if not row or row.status != "running" or row.lease_owner != owner or row.lease_until < now():
+        if (
+            not row
+            or row.status != "running"
+            or row.lease_owner != owner
+            or row.lease_until is None
+            or row.lease_until < now()
+            or not row.credential_secret
+        ):
             return False
         try:
             service.authenticate(db, decrypt(row.credential_secret))

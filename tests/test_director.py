@@ -671,3 +671,16 @@ def test_project_director_is_told_to_read_its_mcp_before_writing_the_task(client
     model = Model({"reply": "Готово", "actions": []})
     director.advance_dialogues(model)
     assert "MCP-серверы" not in model.prompts[0]
+
+
+def test_heartbeat_rejects_row_without_lease(client, setup_project):
+    project, pool = setup_project
+    connect(client, pool)
+    identifier = queue(client)
+    with transaction() as db:
+        row = db.get(director.Dialogue, identifier)
+        row.status = "running"
+        row.lease_owner = "owner"
+        row.lease_until = None
+        row.credential_secret = None
+    assert director.heartbeat(identifier, "owner") is False
