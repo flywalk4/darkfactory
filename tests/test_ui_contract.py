@@ -103,7 +103,7 @@ LOAD_HARNESS = r"""
 const source = require('fs').readFileSync(process.argv[2], 'utf8');
 const body = source.slice(source.indexOf('let loadSeq='), source.indexOf('const openParents'));
 let projectId = 'A', projects = [], poolList = [], taskList = [], boardConnections = null;
-const calls = [], renders = [], pending = {}, nodes = {};
+const calls = [], renders = [], held = new Set(), pending = {}, nodes = {};
 const $ = s => nodes[s] ||= {hidden: true, textContent: '', innerHTML: ''};
 const document = {querySelector: () => ({click() {}}), querySelectorAll: () => [], body: {classList: {contains: () => false}}};
 const tr = s => s, esc = s => s, remember = () => {}, collapseNav = () => {}, toast = () => {};
@@ -114,44 +114,59 @@ function api(path) {
   const match = path.match(/^\/projects\/(\w+)\/tasks$/);
   if (!match) return Promise.resolve(data[path]);
   const tasks = [{id: match[1] + '1', project_id: match[1]}];
-  // The first request for project A hangs until the test releases it.
-  if (match[1] === 'A' && !pending.A) return new Promise(resolve => { pending.A = () => resolve(tasks); });
+  // Requests for a held project hang until the test releases them.
+  if (held.has(match[1])) return new Promise(resolve => { pending[match[1]] = () => resolve(tasks); });
   return Promise.resolve(tasks);
 }
 const tick = () => new Promise(resolve => setTimeout(resolve));
+const ids = () => taskList.map(t => t.id);
 eval(body + `
 (async () => {
-  const slow = load();
+  await load();
+  const loadedA = {tasks: ids(), renders: renders.slice()};
+  held.add('A');
+  held.add('B');
+  const lateA = load({pools: false});
   while (!pending.A) await tick();
   projectId = 'B';
   const switchStart = calls.length;
-  await load({projects: false, pools: false});
+  const switchB = load({pools: false});
+  while (!pending.B) await tick();
   const switchCalls = calls.slice(switchStart);
+  const whileB = ids();
+  pending.B();
+  await switchB;
+  const afterB = ids();
+  const rendersBeforeLateA = renders.length;
   pending.A();
-  await slow;
-  const afterSwitch = {projectId, tasks: taskList.map(t => t.project_id), renders: renders.slice()};
+  await lateA;
+  const afterLateA = {projectId, tasks: ids(), renders: renders.slice(rendersBeforeLateA)};
+  held.clear();
   calls.length = 0;
   await load({pools: false});
-  console.log(JSON.stringify({...afterSwitch, switchCalls, pollCalls: calls}));
+  console.log(JSON.stringify({loadedA, switchCalls, whileB, afterB, afterLateA, pollCalls: calls}));
 })();`);
 """
 
 
 def test_board_load_keeps_only_the_new_project_when_the_switch_happens_mid_request(tmp_path):
-    # Runs the real load() from app.js: project A's /tasks reply arrives after the switch to B.
+    # Runs the real load() from app.js: A loads, a poll for A hangs, the user switches to B,
+    # B's reply arrives, then the late reply for A arrives.
     app = Path(__file__).parent.parent / "darkfactory" / "static" / "app.js"
     harness = tmp_path / "harness.cjs"
     harness.write_text(LOAD_HARNESS)
     run = subprocess.run(["node", str(harness), str(app)], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     result = json.loads(run.stdout)
-    assert result["projectId"] == "B"
-    assert result["tasks"] == ["B"]
-    # The board is emptied on each switch before the reply, and project A's cards never render.
-    assert result["renders"] == [[], [], ["B1"]]
-    # A project click refreshes only the board data; a poll also refreshes projects, not pools.
-    assert sorted(result["switchCalls"]) == ["/connections", "/projects/B/tasks"]
+    assert result["loadedA"] == {"tasks": ["A1"], "renders": [[], ["A1"]]}
+    # While B's tasks are in flight, project A's cards are already gone from the board.
+    assert result["whileB"] == []
+    assert result["afterB"] == ["B1"]
+    # The late reply for A neither overwrites the list nor renders.
+    assert result["afterLateA"] == {"projectId": "B", "tasks": ["B1"], "renders": []}
+    # A project click and a poll refresh projects and the board, but not pools.
+    assert sorted(result["switchCalls"]) == ["/connections", "/projects", "/projects/B/tasks"]
     assert sorted(result["pollCalls"]) == ["/connections", "/projects", "/projects/B/tasks"]
     app_source = app.read_text()
-    assert "click();load({projects:false,pools:false})" in app_source
+    assert "click();load({pools:false})" in app_source
     assert "await load({pools:++pollTick%6===0})" in app_source
