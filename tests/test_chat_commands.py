@@ -416,6 +416,7 @@ def test_rocket_command_and_thread_answer(client, setup_project):
     assert sent[0] == {
         "text": "🧠 *Директор:* Очередь пуста.",
         "alias": "Darkfactory",
+        "emoji": ":factory:",
         "roomId": "ROOM",
         "tmid": "m1",
     }
@@ -435,6 +436,7 @@ def test_rocket_command_and_thread_answer(client, setup_project):
     assert sent[0] == {
         "text": "Ответ передан, задача продолжена.",
         "alias": "Darkfactory",
+        "emoji": ":factory:",
         "roomId": "ROOM",
         "tmid": "n1",
     }
@@ -543,6 +545,7 @@ def test_rocket_bang_commands(client, setup_project, monkeypatch):
     assert deliver()[0] == {
         "text": "🚫 Задача отменена.",
         "alias": "Darkfactory",
+        "emoji": ":factory:",
         "roomId": "ROOM",
         "tmid": "n1",
     }

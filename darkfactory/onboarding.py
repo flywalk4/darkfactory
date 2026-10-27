@@ -323,6 +323,7 @@ class LoginFlow:
                         break
                     if len(self._buffer) + len(chunk) > MAX_OUTPUT:
                         self._status = "failed"
+                        self._buffer.clear()
                         self._stop()
                         break
                     self._buffer.extend(chunk)

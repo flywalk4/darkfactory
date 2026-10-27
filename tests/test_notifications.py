@@ -177,7 +177,7 @@ def test_offline_delivery_payload_and_no_open_db_transaction(task, provider):
             assert "parse_mode" not in payload
             return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
         assert str(request.url) == WEBHOOK
-        assert set(payload) == {"text", "alias"}
+        assert set(payload) == {"text", "alias", "emoji"}
         return httpx.Response(200, json={"success": True})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -617,6 +617,22 @@ def test_jira_behind_a_down_gateway_waits_without_using_attempts(task):
     with httpx.Client(transport=httpx.MockTransport(lambda request: rejected)) as client:
         assert dispatch_notifications(client=client) == 1
     assert delivery().state == "failed"
+
+
+def test_rocket_notifications_have_emoji_avatar_without_public_url(task, monkeypatch):
+    monkeypatch.delenv("DARKFACTORY_PUBLIC_URL", raising=False)
+    channel(task, provider="rocketchat", recipient="#ops")
+    enqueue(task)
+    sent = []
+
+    def receive(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"success": True})
+
+    with httpx.Client(transport=httpx.MockTransport(receive)) as http:
+        assert dispatch_notifications(client=http) == 1
+    assert "avatar" not in sent[0]
+    assert sent[0]["emoji"] == ":factory:"
 
 
 def test_rocket_notifications_are_markdown_with_logo(task, monkeypatch):
