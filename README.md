@@ -411,7 +411,7 @@ The incoming webhook works in two modes, chosen by its "Override Destination Cha
 - **Override off** (the Rocket.Chat default): leave the channel's recipient empty. Every message goes to the webhook's own channel, and thread answers carry only the thread ID (`tmid`). Rocket.Chat refuses any request with `roomId` or `channel` here (`overriding destination channel is disabled for this integration`), so with override off a recipient makes every delivery fail. Put the outgoing webhook in the same room as the incoming one, or answers land outside the thread.
 - **Override on**: the recipient picks where notifications go, and command answers name the room they came from (`roomId`) next to `tmid`. Use this mode when notifications go to a room other than the webhook's own.
 
-Delivery state is in the channel's outbox (`notification_deliveries`). A Director answer to a chat command counts as replied (`director_dialogues.origin_replied`) only after Rocket.Chat or Telegram accepted it; a refused answer stays unreplied with the provider's HTTP status in `last_error`. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar.
+Delivery state is in the channel's outbox (`notification_deliveries`). A Director answer to a chat command counts as replied (`director_dialogues.origin_replied`) only after Rocket.Chat or Telegram accepted it; a refused answer stays unreplied with the provider's HTTP status in `last_error`. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with a non-loopback `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar; otherwise the `:factory:` emoji is.
 
 ### Merge notifications
 
