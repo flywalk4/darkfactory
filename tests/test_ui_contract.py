@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from darkfactory import db, service
 
@@ -95,3 +96,13 @@ def test_board_names_who_asked_for_each_task(client, setup_project):
     assert board[task["id"]]["author"] == me["name"]
     # Work the factory started itself has no author, and the board says so instead of guessing.
     assert board["factory1"]["created_by"] is None and board["factory1"]["author"] is None
+
+
+def test_board_load_drops_responses_of_a_previous_project_or_load():
+    source = (Path(__file__).parent.parent / "darkfactory" / "static" / "app.js").read_text()
+    body = source[source.index("async function load()") : source.index("const openParents")]
+    assert "const seq=++loadSeq" in body
+    # A late reply must not touch the list once another load started or the project changed.
+    assert "if(seq!==loadSeq||projectId!==(project?.id||''))return;" in body
+    assert body.index("return;") < body.index("taskList=nextTasks")
+    assert "/projects/${project.id}/tasks" in body

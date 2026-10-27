@@ -65,15 +65,21 @@ function collapseNav(collapsed){document.body.classList.toggle('nav-collapsed',c
 $('#collapse-nav').onclick=()=>{const collapsed=!document.body.classList.contains('nav-collapsed');remember('df-nav-collapsed',collapsed?'1':'');collapseNav(collapsed);};collapseNav(remembered('df-nav-collapsed')==='1');
 $('#logout').onclick=()=>{sessionStorage.removeItem('df-token');location.reload();};
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{remember('df-view',button.dataset.view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));for(const view of ['board','factory','backlog','schedules','settings','agents','artifacts'])$('#'+view+'-view').hidden=button.dataset.view!==view;if(button.dataset.view==='settings') settings().catch(e=>toast(e.message));if(button.dataset.view==='agents')agentsPage().catch(e=>toast(e.message));if(button.dataset.view==='artifacts')registryPage().catch(e=>toast(e.message));if(button.dataset.view==='backlog')backlogPage().catch(e=>toast(e.message));if(button.dataset.view==='schedules')schedulesPage().catch(e=>toast(e.message));if(button.dataset.view==='factory')factoryPage().catch(e=>toast(e.message));});
+let loadSeq=0;
 async function load() {
-  projects=await api('/projects');poolList=await api('/pools');
+  const seq=++loadSeq;
+  const [nextProjects,nextPools]=await Promise.all([api('/projects'),api('/pools')]);
+  if(seq!==loadSeq)return;
+  projects=nextProjects;poolList=nextPools;
   if(!projects.some(p=>p.id===projectId)) projectId=projects[0]?.id||'';remember('df-project',projectId);
   $('#project-list').innerHTML=projects.map(p=>`<button class="project-item ${p.id===projectId?'selected':''}" data-project="${p.id}"><span class="project-icon">${esc((p.name.trim()[0]||'◆').toUpperCase())}</span><span class="nav-text">${esc(p.name)}</span></button>`).join('');collapseNav(document.body.classList.contains('nav-collapsed'));
   document.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{projectId=b.dataset.project;document.querySelector('[data-view="board"]').click();load().catch(e=>toast(e.message));});
   const project=projects.find(p=>p.id===projectId);$('#current-project').textContent=project?.name||tr('Проекты');$('#project-heading').textContent=project?.name||tr('Твоя фабрика разработки');
   $('#project-description').textContent=project?`${project.remote} · preprod · ${project.checks.length ? tr('{n} обязательных проверок',{n:project.checks.length}) : project.merge_without_checks===false ? tr('в preprod сливает человек: нет проверок') : tr('в preprod автоматически после ревью')} · ${tr('{branch} — вручную',{branch:esc(project.seed_branch)})}`:tr('Подключи первый проект, чтобы начать работу.');
   $('#new-incident').disabled=$('#new-task').disabled=!project;$('#empty').hidden=!!project;$('#board').hidden=!project;$('#metrics').hidden=!project;$('.board-heading').hidden=!project;
-  [taskList,boardConnections]=project?await Promise.all([api(`/projects/${projectId}/tasks`),api('/connections').catch(()=>null)]):[[],null];renderBoard();
+  const [nextTasks,nextConnections]=project?await Promise.all([api(`/projects/${project.id}/tasks`),api('/connections').catch(()=>null)]):[[],null];
+  if(seq!==loadSeq||projectId!==(project?.id||''))return;
+  taskList=nextTasks;boardConnections=nextConnections;renderBoard();
   if(!$('#settings-view').hidden) await settings();
   if(!$('#artifacts-view').hidden) await registryPage();
   if(!$('#backlog-view').hidden&&!$('#backlog-text')?.value) await backlogPage();
