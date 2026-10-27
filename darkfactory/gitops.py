@@ -61,6 +61,8 @@ EVIDENCE = re.compile(
 IMAGE = re.compile(r"\.(?:png|jpe?g|gif|webp|bmp)$", re.IGNORECASE)
 IMAGE_DIRS = {"assets", "shots", "design-refs", "public", "static", "images", "img", "icons", "res"}
 CACHE_DIRS = {".npm-cache", ".npm", "_cacache", "npm-cache"}
+# pytest falls back to `pytest-of-<user>/` in the working directory when /tmp is full.
+PYTEST_TMP = re.compile(r"(?:^|/)pytest-of-[^/]+/")
 # Code in a logs/ or evidence/ package (a log viewer, an evidence service) is source.
 OUTPUT_DIRS = {"logs", "evidence"}
 SOURCE = re.compile(r"\.(?:py|[cm]?[jt]sx?|cs|java|kt|go|rs|rb|php|vue|svelte|html|s?css|md)$", re.IGNORECASE)
@@ -74,6 +76,7 @@ def run_output(path):
     return bool(
         name.lower().endswith(".log")
         or CACHE_DIRS & dirs
+        or PYTEST_TMP.search(path)
         or (OUTPUT_DIRS & dirs and not SOURCE.search(name))
         or STATUS.search(name)
         or (IMAGE.search(name) and not IMAGE_DIRS & dirs)

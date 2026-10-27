@@ -569,6 +569,7 @@ def test_tidy_keeps_run_output_out_of_the_commit(publish_repository):
         "app/npm-cache/_logs/debug.txt",
         "screenshot-1440.png",
         "src/panel/after.jpg",
+        "pytest-of-root/pytest-0/test_x0/out.json",
     ]
     kept = [
         "src/assets/logo.png",
