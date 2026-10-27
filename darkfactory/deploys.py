@@ -40,12 +40,19 @@ def config(project):
     return json.loads(decrypt(project.secret) or "{}")
 
 
+def gitlab_api(url):
+    """GitLab's REST base for a server URL: owners often enter the web address, and a web path answers an
+    API call with a redirect to the sign-in page."""
+    url = url.rstrip("/")
+    return url if url.endswith("/api/v4") else url + "/api/v4"
+
+
 def gitlab(project):
     """(API base, repository path, token) of the project's GitLab. A project without MRs (forge "git") still
     deploys: the API sits beside its HTTPS remote and the Git token serves both."""
     settings = config(project)
     if project.forge == "gitlab" and project.forge_url and project.forge_repo:
-        return project.forge_url.rstrip("/"), project.forge_repo, settings.get("forge_token", "")
+        return gitlab_api(project.forge_url), project.forge_repo, settings.get("forge_token", "")
     remote = urlsplit(project.remote)
     if project.forge != "git" or remote.scheme not in {"http", "https"} or not remote.hostname:
         return None

@@ -22,6 +22,7 @@ from . import (
     disk,
     environment,
     initialization,
+    lessons,
     logs,
     mainsync,
     promotions,
@@ -155,6 +156,23 @@ def without_later(message):
         return json.dumps(review, ensure_ascii=False)
     except (ValueError, TypeError, AttributeError):
         return message
+
+
+def checks_mutation(repo, output=""):
+    """A failed result when the checks left tracked files changed: the writer needs the paths to fix it."""
+    changed = repo.git("diff", "--name-only", "HEAD", cwd=repo.work, check=False).stdout.split()
+    if not changed:
+        return None
+    text = "Required checks modified tracked source files:\n" + "\n".join(changed[:20])
+    if len(changed) > 20:
+        text += f"\n… and {len(changed) - 20} more"
+    text += (
+        "\n.git is read-only in the sandbox, so `git checkout` cannot restore them inside a check: "
+        "keep tests from writing tracked files, or copy them aside and back."
+    )
+    if output:
+        text += "\n\nCheck output:\n" + output[-2000:]
+    return {"status": "checks_failed", "text": text}
 
 
 def unbacked_claims(repo, claimed):
@@ -534,7 +552,8 @@ def accept_merge(db, task):
         # The merge fast-forwarded a checked preprod to a checked candidate: the new head is known healthy,
         # so the monitor does not re-run every check on it. The periodic full re-check keeps its schedule.
         project.health = {**health, "sha": task.result_sha}
-    # Factory bookkeeping (index, environment) rides to main with the next real change.
+    lessons.record(db, task, project)
+    # Factory bookkeeping (index, environment) rides to the seed branch with the next real change.
     root = (
         not task.system_check
         and not initialization.active(task)
@@ -545,7 +564,7 @@ def accept_merge(db, task):
         db,
         task,
         "accepted",
-        "Слито в preprod. Перенос в main — вручную в карточке задачи"
+        f"Слито в preprod. Перенос в {db.get(Project, task.project_id).seed_branch} — вручную в карточке задачи"
         if root
         else "Проверенный результат слит в preprod",
         commit=task.result_sha,
@@ -993,11 +1012,7 @@ class Worker:
                     lambda: beat(),
                     max(1, task.execution_deadline - now()),
                 )
-                if repo.git("diff", "--quiet", "HEAD", cwd=repo.work, check=False).returncode:
-                    checked = {
-                        "status": "checks_failed",
-                        "text": "Required checks modified tracked source files",
-                    }
+                checked = checks_mutation(repo, checked.get("text", "")) or checked
                 (repo.artifacts / "checks.txt").write_text(checked.get("text", ""))
                 result.update(checked)
             elif phase == "collect":
@@ -1098,11 +1113,7 @@ class Worker:
                         result = self.executor.run(task, project, connection, role, lambda: beat(), remaining)
                 if phase in {"checks", "verify"}:
                     (repo.artifacts / "checks.txt").write_text(result.get("text", ""))
-                    if repo.git("diff", "--quiet", "HEAD", cwd=repo.work, check=False).returncode:
-                        result = {
-                            "status": "checks_failed",
-                            "text": "Required checks modified tracked source files",
-                        }
+                    result = checks_mutation(repo, result.get("text", "")) or result
                     if phase == "verify" and initialization.active(task) and result.get("status") == "ok":
                         try:
                             initialization.documents(repo, task.candidate_sha)
@@ -1112,15 +1123,20 @@ class Worker:
                     (repo.artifacts / "checks.txt").write_text(inner.get("text", ""))
                 # A writer that stopped to ask or to split leaves its workspace as it is.
                 if phase == "implement" and result.get("status") == "ok" and not result.get("request"):
+                    # Tidy first: run output left by a check run is not the writer's change, and counting it
+                    # against the "only this file" rules burns correction cycles the writer cannot fix.
+                    tidied = repo.tidy()
                     try:
                         if initialization.active(task):
                             initialization.validate(repo)
                         if environment.active(task):
                             environment.validate(repo)
+                        if lessons.active(task):
+                            lessons.validate(repo)
                     except (ValueError, UnicodeError) as exc:
                         result = {"status": "checks_failed", "text": str(exc)}
                     else:
-                        if tidied := repo.tidy():
+                        if tidied:
                             listed = ", ".join(tidied[:10]) + (
                                 f" и ещё {len(tidied) - 10}" if len(tidied) > 10 else ""
                             )
@@ -1186,6 +1202,8 @@ class Worker:
                     raise RuntimeError("Acceptance evidence does not match the candidate commit")
                 if initialization.active(task) and not (task.role_config or {}).get("merge_approved"):
                     initialization.only_documents(repo, task.target_sha, task.candidate_sha)
+                if lessons.active(task):
+                    lessons.only_lessons(repo, task.target_sha, task.candidate_sha)
                 if task.dependency_commits:
                     # Accepted inputs are checked right before the merge. The push itself runs outside the
                     # transaction: it holds the global lock, and a slow remote would expire every lease.
@@ -1712,7 +1730,7 @@ def periodic(future, pool, job):
     re-raising it on every tick would keep the scheduler from ever reaching the claim."""
     if future is not None and not future.done():
         return future
-    if future is not None and (error := future.exception()) is not None:
+    if future is not None and not future.cancelled() and (error := future.exception()) is not None:
         log.error("Background job %s failed", job.__name__, exc_info=error)
     return pool.submit(job)
 

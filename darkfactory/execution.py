@@ -572,6 +572,10 @@ class DockerExecutor:
 
             if guide := project_guide(project.id):
                 profile = {**profile, "skill_definitions": [*profile["skill_definitions"], guide]}
+            from .lessons import skill as project_lessons
+
+            if rules := project_lessons(ROOT / "workspaces" / task.id):
+                profile = {**profile, "skill_definitions": [*profile["skill_definitions"], rules]}
         if role == "qa":
             from .standqa import profile as tester
 
@@ -1004,10 +1008,16 @@ class DockerExecutor:
                 ),
                 read_only=True,
                 # exec: test binaries run from /tmp (`go test`, cargo, native addons); Docker defaults to noexec.
-                tmpfs={"/tmp": "rw,exec,nosuid,nodev,size=512m,mode=1777"},
+                # 512m filled up on a Python repo's test run and pytest fell back to pytest-of-<user>/ in /workspace.
+                tmpfs={
+                    "/tmp": f"rw,exec,nosuid,nodev,size={os.getenv('DARKFACTORY_EXECUTOR_TMP', '2g')},mode=1777"
+                },
                 cap_drop=["ALL"],
                 cap_add=RUNNER_CAPABILITIES,
                 security_opt=["no-new-privileges:true"],
+                # The runner is not an init: orphans (detached git maintenance, killed test servers) stayed
+                # zombies until the process limit was reached and every fork failed. Docker's init reaps them.
+                init=True,
                 # A dev server, a browser and a dotnet/git test run together exceed 256 processes.
                 # An agent's long run leaves background shells, servers and test processes behind; at 1024 the
                 # kernel refused forks mid-run ("fork rejected by pids controller") and the agent died with a

@@ -15,13 +15,14 @@ from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, String, Text, select
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, object_session
 
 from .db import Base, Project, Task, decrypt, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
-KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "self_report", "task")
+KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "self_report", "lessons", "task")
+# Stored as the title of a built-in schedule and matched by the page, which names the project's seed branch.
 TITLES = {
     "self_report": "Отчёт о сбоях фабрики",
     "stand_qa": "Тестирование стенда",
@@ -29,6 +30,7 @@ TITLES = {
     "backlog": "Бэклог в задачи",
     "main_sync": "Влить main в preprod",
     "auto_promote": "Автоперенос preprod в main",
+    "lessons": "Уроки проекта",
     "task": "Задача",
 }
 CLOSED = {"merged", "cancelled", "duplicate", "checked"}
@@ -38,10 +40,19 @@ QUEUED = {
     "stand_qa": "Тестирование стенда поставлено в очередь",
     "stand_build": "Сборка приложения на стенде поставлена в очередь",
     "backlog": "Бэклог поставлен в очередь",
-    "main_sync": "Синхронизация main поставлена в очередь",
-    "auto_promote": "Проверка автопереноса в main поставлена в очередь",
+    "main_sync": "Синхронизация {branch} поставлена в очередь",
+    "auto_promote": "Проверка автопереноса в {branch} поставлена в очередь",
 }
+LESSONS_CRON = "0 6 * * 1"
 CHECK_EVERY = 30
+
+
+def queued(kind, project):
+    """The queued text of a kind, naming the project's seed branch where the job works with it."""
+    text = QUEUED.get(kind)
+    return text and text.format(branch=project.seed_branch)
+
+
 # Field ranges of a five-field cron line: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
 FIELDS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 ALIASES = {
@@ -182,12 +193,23 @@ def seed(db, project):
     if config.get("stand_url") and (cron := hours_to_cron(config.get("qa_hours", 4))):
         made.append(create(db, project, "stand_qa", cron))
     project.health = {**(project.health or {}), "schedules_seeded": True}
+    return made + seed_lessons(db, project)
+
+
+def seed_lessons(db, project):
+    """The weekly lessons schedule, once per project: new ones get it with the others, older ones on upgrade."""
+    if (project.health or {}).get("lessons_seeded"):
+        return []
+    made = [create(db, project, "lessons", LESSONS_CRON)]
+    project.health = {**(project.health or {}), "lessons_seeded": True}
     return made
 
 
 def seed_all():
     with transaction() as db:
-        return sum(len(seed(db, project)) for project in db.scalars(select(Project)))
+        return sum(
+            len(seed(db, project)) + len(seed_lessons(db, project)) for project in db.scalars(select(Project))
+        )
 
 
 def stand_added(db, project):
@@ -230,7 +252,7 @@ def fire(db, schedule):
         if not promotions.auto_hours(project):
             return "Автоперенос выключен в настройках проекта"
         promotions.auto_request(db, project)
-        return QUEUED["auto_promote"]
+        return queued("auto_promote", project)
     if schedule.kind == "self_report":
         from . import selfreport
 
@@ -239,7 +261,15 @@ def fire(db, schedule):
         return QUEUED["self_report"]
     if schedule.kind == "main_sync":
         project.health = {**(project.health or {}), "main_sync_requested": now()}
-        return QUEUED["main_sync"]
+        return queued("main_sync", project)
+    if schedule.kind == "lessons":
+        from . import lessons
+
+        task, result = lessons.queue(db, project, schedule.id)
+        if task:
+            event(db, task, "scheduled", f"Создана по расписанию «{schedule.title}» ({schedule.cron})")
+            schedule.last_task_id = task.id
+        return result
     previous = db.get(Task, schedule.last_task_id or "")
     if previous and previous.state not in CLOSED:
         return f"Пропущено: прошлая задача {previous.id} ещё не закончена"
@@ -356,6 +386,7 @@ def build_job(project):
 
 
 def view(schedule):
+    project = object_session(schedule).get(Project, schedule.project_id)
     return {
         "id": schedule.id,
         "project_id": schedule.project_id,
@@ -369,7 +400,7 @@ def view(schedule):
         "next_at": schedule.next_at,
         "last_at": schedule.last_at,
         "last_result": schedule.last_result,
-        "queued": schedule.last_result == QUEUED.get(schedule.kind),
+        "queued": schedule.last_result == queued(schedule.kind, project),
         "last_task_id": schedule.last_task_id,
     }
 

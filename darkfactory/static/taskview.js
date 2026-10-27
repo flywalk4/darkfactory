@@ -20,7 +20,7 @@ function nowLine(t){
     return tr('В очереди: {phase}',{phase:phases[t.phase]||t.phase});
   }
   if(t.state==='review_required')return tr('Ревью одобрило, нужно твоё слияние в preprod');
-  if(t.state==='merged')return t.promotion?.state==='pending'?tr('Слита в preprod, ждёт переноса в main'):tr('Слита в preprod');
+  if(t.state==='merged')return t.promotion?.state==='pending'?tr('Слита в preprod, ждёт переноса в {branch}',{branch:t.promotion.target||seedBranch(t.project_id)}):tr('Слита в preprod');
   if(t.state==='cancelled')return t.reason?tr('Отменена: {reason}',{reason:t.reason}):tr('Отменена');
   return names[t.state]||t.state;
 }

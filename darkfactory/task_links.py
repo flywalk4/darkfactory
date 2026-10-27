@@ -38,6 +38,9 @@ def task_url(task, *, commit=None):
 def public_asset(name):
     """A static file's URL for chat avatars, only when the factory has a configured public address."""
     base = _web_base(os.getenv("DARKFACTORY_PUBLIC_URL", ""))
+    # A loopback address (the Compose default) is unreachable from chat users' browsers.
+    if base and base.hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+        return None
     return f"{urlunsplit(base).rstrip('/')}/static/{name}" if base else None
 
 

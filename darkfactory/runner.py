@@ -882,7 +882,7 @@ class Followups:
         if (ask := self.coverage(output)) is not None:
             return ask
         evidence = os.environ.get("DARKFACTORY_EVIDENCE_DIR")
-        if evidence and Path(evidence, "owner-request.json").exists():
+        if evidence and (Path(evidence) / "owner-request.json").exists():
             # The writer stopped to ask the owner or to split the work; nothing is ready to check.
             return None
         if self.review:
