@@ -147,5 +147,7 @@ def test_board_load_keeps_only_the_new_project_when_the_switch_happens_mid_reque
     assert result["tasks"] == ["B"]
     # The board is emptied on each switch before the reply, and project A's cards never render.
     assert result["renders"] == [[], [], ["B1"]]
-    # A poll refreshes only the board data, not the project and pool lists.
+    # A poll and a project click refresh only the board data, not the project and pool lists.
     assert sorted(result["pollCalls"]) == ["/connections", "/projects/B/tasks"]
+    app_source = app.read_text()
+    assert "click();load({full:false})" in app_source
