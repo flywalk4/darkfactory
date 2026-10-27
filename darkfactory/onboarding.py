@@ -263,11 +263,15 @@ class LoginFlow:
             )
             if valid:
                 self._url = candidate
-                self._status = "waiting"
+                if self.provider != "codex":
+                    self._status = "waiting"
         if self.provider == "codex":
             match = re.search(r"one-time code[^\n]*\n\s*([A-Z0-9]{3,8}-[A-Z0-9]{3,8})\b", text)
             if match:
                 self._code = match.group(1)
+                if self._url:
+                    # Waiting means the user has both the link and the code; the output may arrive in pieces.
+                    self._status = "waiting"
         else:
             rejected = text.rfind("OAuth error")
             if rejected > max(text.rfind("://"), self._retried):
@@ -323,6 +327,7 @@ class LoginFlow:
                         break
                     if len(self._buffer) + len(chunk) > MAX_OUTPUT:
                         self._status = "failed"
+                        self._buffer.clear()  # Cleared with the status: a reader must not see output of a failed login.
                         self._stop()
                         break
                     self._buffer.extend(chunk)
@@ -335,6 +340,7 @@ class LoginFlow:
                             self._status = "done"
                         else:
                             self._status = "failed"
+                        self._buffer.clear()
                         break
         except Exception:
             with self._lock:

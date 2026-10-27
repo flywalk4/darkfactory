@@ -368,3 +368,17 @@ def test_toolchain_images_build_with_buildkit_when_the_cli_is_present(monkeypatc
     (fake / "docker").write_text("#!/bin/sh\necho 'ERROR: failed to solve'\nexit 1\n")
     with pytest.raises(RuntimeError, match="failed to solve"):
         toolchains._buildkit("darkfactory-toolchain:x", "FROM tools\n", {}, lambda: True)
+
+
+def test_toolchain_buildkit_reports_cli_failure_when_it_exits_before_reading_the_dockerfile(
+    monkeypatch, tmp_path
+):
+    from darkfactory import toolchains
+
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "docker").write_text("#!/bin/sh\necho 'ERROR: failed early'\nexit 1\n")
+    (fake / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:/usr/bin:/bin")
+    with pytest.raises(RuntimeError, match="failed early"):
+        toolchains._buildkit("darkfactory-toolchain:x", "FROM tools\n" + "# x\n" * 500_000, {}, lambda: True)

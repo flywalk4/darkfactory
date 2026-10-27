@@ -91,14 +91,6 @@ def request(db, project):
     project.health = {**(project.health or {}), "backlog": {**state(project), "requested": now()}}
 
 
-def due(db, project):
-    if not db.scalar(
-        select(BacklogItem.id).where(BacklogItem.project_id == project.id, BacklogItem.state == "open")
-    ):
-        return False
-    return bool(state(project).get("requested"))
-
-
 def overview(project):
     """Architecture notes from preprod help the grouper see module boundaries."""
     mirror = ROOT / "repositories" / (project.id + ".git")
