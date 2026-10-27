@@ -44,6 +44,9 @@ def delegate(db, task, plan):
     if len(limits["members"]) - 1 + len(plan["subtasks"]) > settings.max_delegated_tasks:
         raise ValueError("Planner subtasks exceed the shared task tree limit")
     profiles = {profile.name for profile in settings.profiles}
+    writes = {server.name for server in settings.mcp_servers if not server.read_only}
+    # A profile with a write MCP can only write; its subtask is planned by the project's planner.
+    writers_only = {profile.name for profile in settings.profiles if writes & set(profile.mcp_servers)}
     child_configs = {}
     # Validate the entire batch before adding any child or relationship. A later
     # invalid profile must not leave earlier siblings queued for execution.
@@ -58,7 +61,11 @@ def delegate(db, task, plan):
         if selected is not None:
             if selected not in profiles:
                 raise ValueError("Planner referenced an unknown agent profile")
-            assignments.update(planner=selected, writer=selected)
+            if selected in writers_only:
+                assignments.pop("planner", None)
+                assignments["writer"] = selected
+            else:
+                assignments.update(planner=selected, writer=selected)
         if assignments:
             overrides["profiles"] = assignments
         if item.get("tier") in ("light", "heavy"):
