@@ -151,3 +151,14 @@ def test_auto_promote_schedule_needs_the_setting(client, setup_project):
     assert started["queued"]
     jobs = client.get(base).json()["jobs"]
     assert jobs["auto_promote"]["requested"]
+
+
+def test_parse_is_cached_and_sparse_cron_skips_idle_months():
+    schedules.parse.cache_clear()
+    start = datetime(2026, 2, 1, tzinfo=ZoneInfo("UTC")).timestamp()
+    first = schedules.next_time("0 0 1 12 *", start)
+    assert datetime.fromtimestamp(first, ZoneInfo("UTC")) == datetime(2026, 12, 1, tzinfo=ZoneInfo("UTC"))
+    for _ in range(5):
+        schedules.next_time("0 0 1 12 *", start)
+    info = schedules.parse.cache_info()
+    assert (info.misses, info.hits) == (1, 5)

@@ -11,6 +11,7 @@ import os
 import re
 import time
 from datetime import datetime, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, String, Text, select
@@ -76,8 +77,9 @@ def default_timezone():
     return os.getenv("DARKFACTORY_TIMEZONE", "UTC")
 
 
+@lru_cache(maxsize=256)
 def parse(expression):
-    """Five sets of allowed values; ValueError names what is wrong."""
+    """Five sets of allowed values (read-only, cached per line); ValueError names what is wrong."""
     expression = ALIASES.get(expression.strip(), expression.strip())
     parts = expression.split()
     if len(parts) != 5:
@@ -100,11 +102,11 @@ def parse(expression):
             if not low <= start <= end <= high or step < 1:
                 raise ValueError(f"Cron: «{item}» вне диапазона {low}–{high}")
             values.update(range(start, end + 1, step))
-        result.append(values)
+        result.append(frozenset(values))
     if 7 in result[4]:
         result[4] = (result[4] - {7}) | {0}
     result.append((parts[2] != "*", parts[4] != "*"))
-    return result
+    return tuple(result)
 
 
 def zone(name):
@@ -121,6 +123,9 @@ def next_time(expression, after, timezone="UTC"):
     moment = datetime.fromtimestamp(after, tz).replace(second=0, microsecond=0) + timedelta(minutes=1)
     day = moment.replace(hour=0, minute=0)
     for _ in range(366 * 5):
+        if day.month not in months:  # Skip the whole month instead of testing each of its days.
+            day = (day.replace(day=28) + timedelta(days=4)).replace(day=1, hour=0, minute=0)
+            continue
         weekday = (day.weekday() + 1) % 7  # cron counts from Sunday
         # Both restricted: either matches (classic cron); one restricted: that one decides.
         if day_set and weekday_set:
