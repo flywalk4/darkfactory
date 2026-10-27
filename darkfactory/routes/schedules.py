@@ -14,7 +14,9 @@ router = APIRouter()
 
 
 class ScheduleInput(BaseModel):
-    kind: Literal["stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "lessons", "task"]
+    kind: Literal[
+        "stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "self_report", "lessons", "task"
+    ]
     title: str | None = Field(default=None, max_length=300)
     cron: str = Field(min_length=1, max_length=120)
     timezone: str | None = Field(default=None, max_length=64)

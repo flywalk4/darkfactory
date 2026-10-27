@@ -382,6 +382,30 @@ def test_publish_changed_tree_still_creates_forge_record(publish_repository, mon
     assert all(request.url.host == "forge.invalid" for request in calls)
 
 
+@pytest.mark.parametrize("forge_url", ["https://forge.invalid", "https://forge.invalid/api/v4/"])
+def test_gitlab_publish_calls_rest_api_for_web_server_url(publish_repository, monkeypatch, forge_url):
+    repo = publish_repository
+    repo.project.forge = "gitlab"
+    repo.project.forge_url = forge_url
+    (repo.work / "changed.txt").write_text("new implementation\n")
+    sha = repo.commit()
+    paths = []
+
+    def respond(request):
+        paths.append(request.url.raw_path.decode().split("?")[0])
+        assert request.headers["PRIVATE-TOKEN"] == repo.credentials.get("forge_token", "")
+        return gitops.httpx.Response(200, json=[{"web_url": "https://forge.invalid/mr/1"}])
+
+    real_client = gitops.httpx.Client
+    monkeypatch.setattr(
+        gitops.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=gitops.httpx.MockTransport(respond), **kwargs),
+    )
+    assert repo.publish(sha) == "https://forge.invalid/mr/1"
+    assert paths == ["/api/v4/projects/company%2Fproject/merge_requests"]
+
+
 @pytest.mark.parametrize("interrupt_phase", ["clone", "checkout"])
 def test_interrupted_initial_workspace_is_atomic_and_can_retry(
     publish_repository, repository_factory, monkeypatch, interrupt_phase
@@ -545,6 +569,7 @@ def test_tidy_keeps_run_output_out_of_the_commit(publish_repository):
         "app/npm-cache/_logs/debug.txt",
         "screenshot-1440.png",
         "src/panel/after.jpg",
+        "pytest-of-root/pytest-0/test_x0/out.json",
     ]
     kept = [
         "src/assets/logo.png",
@@ -563,3 +588,75 @@ def test_tidy_keeps_run_output_out_of_the_commit(publish_repository):
     tree = publish_repository.git("ls-tree", "-r", "--name-only", sha, cwd=publish_repository.work).split()
     assert not set(junk) & set(tree) and set(kept) <= set(tree)
     assert (publish_repository.artifacts / "run-output" / "npm-ci.log").is_file()
+
+
+def _push_outside_factory(repo, branch, name):
+    """A person's commit on top of the remote branch, pushed from a separate clone."""
+    clone = repo.work.parent / f"person-{name}"
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "clone", "-b", branch, repo.project.remote, str(clone)], env=env, check=True)
+    (clone / f"{name}.txt").write_text("manual change\n")
+    for args in (
+        ["add", "."],
+        ["-c", "user.name=Person", "-c", "user.email=person@localhost", "commit", "-m", "Manual change"],
+        ["push", "origin", branch],
+    ):
+        subprocess.run(["git", *args], cwd=clone, env=env, capture_output=True, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=clone, env=env, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_merge_keeps_task_branch_with_commits_pushed_outside_the_factory(publish_repository):
+    repo = publish_repository
+    repo.project.forge = "git"
+    target = repo.head()
+    (repo.work / "changed.txt").write_text("factory change\n")
+    sha = repo.commit()
+    repo.publish(sha)
+    manual = _push_outside_factory(repo, repo.task.branch, "manual")
+    assert repo.merge(sha, target)
+    remote = Path(repo.project.remote)
+    assert repo.git("rev-parse", "refs/heads/preprod", cwd=remote) == sha
+    assert repo.git("rev-parse", f"refs/heads/{repo.task.branch}", cwd=remote) == manual
+
+
+def test_merge_drops_task_branch_fully_contained_in_preprod(publish_repository):
+    repo = publish_repository
+    repo.project.forge = "git"
+    target = repo.head()
+    (repo.work / "changed.txt").write_text("factory change\n")
+    sha = repo.commit()
+    repo.publish(sha)
+    assert repo.merge(sha, target)
+    remote = Path(repo.project.remote)
+    missing = repo.git("rev-parse", "--verify", f"refs/heads/{repo.task.branch}", cwd=remote, check=False)
+    assert missing.returncode
+
+
+def test_publish_explains_a_task_branch_moved_outside_the_factory(publish_repository):
+    repo = publish_repository
+    repo.project.forge = "git"
+    (repo.work / "first.txt").write_text("first\n")
+    repo.publish(repo.commit())
+    manual = _push_outside_factory(repo, repo.task.branch, "manual")
+    (repo.work / "second.txt").write_text("second\n")
+    with pytest.raises(gitops.GitError, match="изменили вне фабрики"):
+        repo.publish(repo.commit())
+    remote = Path(repo.project.remote)
+    assert repo.git("rev-parse", f"refs/heads/{repo.task.branch}", cwd=remote) == manual
+
+
+def test_checks_mutation_names_changed_files_and_keeps_check_output(publish_repository):
+    from darkfactory.worker import checks_mutation
+
+    repo = publish_repository
+    (repo.work / "fixture.json").write_text("{}\n")
+    repo.commit()
+    assert checks_mutation(repo, "all passed") is None
+    (repo.work / "fixture.json").write_text('{"rewritten": true}\n')
+    result = checks_mutation(repo, "pytest output tail")
+    assert result["status"] == "checks_failed"
+    assert "fixture.json" in result["text"]
+    assert "read-only" in result["text"]
+    assert result["text"].endswith("pytest output tail")

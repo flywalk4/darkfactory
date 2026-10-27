@@ -334,7 +334,7 @@ def _completion_message(db, task, message):
     from .promotions import proposal
 
     if proposal(db, task):
-        lines.append("Влить в main / отклонить: " + task_url(task) + "&promotion=1")
+        lines.append(f"Влить в {project.seed_branch} / отклонить: " + task_url(task) + "&promotion=1")
     return "\n".join(lines)
 
 
@@ -598,6 +598,9 @@ def _send(client, claimed):
         }
         if avatar := public_asset("logo.png"):
             payload["avatar"] = avatar
+        else:
+            # Without a public address there is no image URL; an emoji avatar still avoids the grey default.
+            payload["emoji"] = ":factory:"
         # Rocket.Chat rejects roomId/channel when the webhook's "Override Destination Channel" is off.
         # A channel without a recipient posts to the webhook's own channel, so a thread reply needs only tmid.
         if reply_to.get("room_id") and (claimed.get("recipient") or not reply_to.get("tmid")):

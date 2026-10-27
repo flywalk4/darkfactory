@@ -11,17 +11,20 @@ import os
 import re
 import time
 from datetime import datetime, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, String, Text, select
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, object_session
 
 from .db import Base, Project, Task, decrypt, event, now, transaction, uid
 
 log = logging.getLogger(__name__)
 
-KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "lessons", "task")
+KINDS = ("stand_qa", "stand_build", "backlog", "main_sync", "auto_promote", "self_report", "lessons", "task")
+# Stored as the title of a built-in schedule and matched by the page, which names the project's seed branch.
 TITLES = {
+    "self_report": "Отчёт о сбоях фабрики",
     "stand_qa": "Тестирование стенда",
     "stand_build": "Сборка приложения на стенде",
     "backlog": "Бэклог в задачи",
@@ -33,14 +36,23 @@ TITLES = {
 CLOSED = {"merged", "cancelled", "duplicate", "checked"}
 # A job handed over to its own worker loop: its progress shows in `jobs`, not in this text.
 QUEUED = {
+    "self_report": "Отчёт о сбоях фабрики поставлен в очередь",
     "stand_qa": "Тестирование стенда поставлено в очередь",
     "stand_build": "Сборка приложения на стенде поставлена в очередь",
     "backlog": "Бэклог поставлен в очередь",
-    "main_sync": "Синхронизация main поставлена в очередь",
-    "auto_promote": "Проверка автопереноса в main поставлена в очередь",
+    "main_sync": "Синхронизация {branch} поставлена в очередь",
+    "auto_promote": "Проверка автопереноса в {branch} поставлена в очередь",
 }
 LESSONS_CRON = "0 6 * * 1"
 CHECK_EVERY = 30
+
+
+def queued(kind, project):
+    """The queued text of a kind, naming the project's seed branch where the job works with it."""
+    text = QUEUED.get(kind)
+    return text and text.format(branch=project.seed_branch)
+
+
 # Field ranges of a five-field cron line: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
 FIELDS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 ALIASES = {
@@ -76,8 +88,9 @@ def default_timezone():
     return os.getenv("DARKFACTORY_TIMEZONE", "UTC")
 
 
+@lru_cache(maxsize=256)
 def parse(expression):
-    """Five sets of allowed values; ValueError names what is wrong."""
+    """Five sets of allowed values (read-only, cached per line); ValueError names what is wrong."""
     expression = ALIASES.get(expression.strip(), expression.strip())
     parts = expression.split()
     if len(parts) != 5:
@@ -100,11 +113,11 @@ def parse(expression):
             if not low <= start <= end <= high or step < 1:
                 raise ValueError(f"Cron: «{item}» вне диапазона {low}–{high}")
             values.update(range(start, end + 1, step))
-        result.append(values)
+        result.append(frozenset(values))
     if 7 in result[4]:
         result[4] = (result[4] - {7}) | {0}
     result.append((parts[2] != "*", parts[4] != "*"))
-    return result
+    return tuple(result)
 
 
 def zone(name):
@@ -121,6 +134,9 @@ def next_time(expression, after, timezone="UTC"):
     moment = datetime.fromtimestamp(after, tz).replace(second=0, microsecond=0) + timedelta(minutes=1)
     day = moment.replace(hour=0, minute=0)
     for _ in range(366 * 5):
+        if day.month not in months:  # Skip the whole month instead of testing each of its days.
+            day = (day.replace(day=28) + timedelta(days=4)).replace(day=1, hour=0, minute=0)
+            continue
         weekday = (day.weekday() + 1) % 7  # cron counts from Sunday
         # Both restricted: either matches (classic cron); one restricted: that one decides.
         if day_set and weekday_set:
@@ -236,10 +252,16 @@ def fire(db, schedule):
         if not promotions.auto_hours(project):
             return "Автоперенос выключен в настройках проекта"
         promotions.auto_request(db, project)
-        return QUEUED["auto_promote"]
+        return queued("auto_promote", project)
+    if schedule.kind == "self_report":
+        from . import selfreport
+
+        if not selfreport.request(db, project):
+            return "Проект не отмечен как фабрика"
+        return QUEUED["self_report"]
     if schedule.kind == "main_sync":
         project.health = {**(project.health or {}), "main_sync_requested": now()}
-        return QUEUED["main_sync"]
+        return queued("main_sync", project)
     if schedule.kind == "lessons":
         from . import lessons
 
@@ -326,6 +348,11 @@ def jobs(db, project):
             "error": grouping.get("error"),
             "found": grouping.get("tasks"),
         },
+        "self_report": {
+            key: value
+            for key, value in (health.get("self_report") or {}).items()
+            if key in {"requested", "at", "found"}
+        },
         "auto_promote": {
             "requested": (health.get("auto_promote") or {}).get("requested"),
             "at": (health.get("auto_promote") or {}).get("at"),
@@ -359,6 +386,7 @@ def build_job(project):
 
 
 def view(schedule):
+    project = object_session(schedule).get(Project, schedule.project_id)
     return {
         "id": schedule.id,
         "project_id": schedule.project_id,
@@ -372,7 +400,7 @@ def view(schedule):
         "next_at": schedule.next_at,
         "last_at": schedule.last_at,
         "last_result": schedule.last_result,
-        "queued": schedule.last_result == QUEUED.get(schedule.kind),
+        "queued": schedule.last_result == queued(schedule.kind, project),
         "last_task_id": schedule.last_task_id,
     }
 

@@ -1008,7 +1008,10 @@ class DockerExecutor:
                 ),
                 read_only=True,
                 # exec: test binaries run from /tmp (`go test`, cargo, native addons); Docker defaults to noexec.
-                tmpfs={"/tmp": "rw,exec,nosuid,nodev,size=512m,mode=1777"},
+                # 512m filled up on a Python repo's test run and pytest fell back to pytest-of-<user>/ in /workspace.
+                tmpfs={
+                    "/tmp": f"rw,exec,nosuid,nodev,size={os.getenv('DARKFACTORY_EXECUTOR_TMP', '2g')},mode=1777"
+                },
                 cap_drop=["ALL"],
                 cap_add=RUNNER_CAPABILITIES,
                 security_opt=["no-new-privileges:true"],

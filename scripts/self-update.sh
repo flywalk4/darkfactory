@@ -82,20 +82,48 @@ healthy() {
     return 1
 }
 
+back_to() {
+    # --keep, not --hard: the checkout was clean at the start, but a hand edit made during the long build and
+    # idle wait must survive. An edit to a file that differs between the two versions stops the reset instead.
+    git reset -q --keep "$1"
+}
+
 git fetch -q "$REMOTE" "$BRANCH"
 current=$(git rev-parse HEAD)
 target=$(git rev-parse FETCH_HEAD)
-[ "$current" = "$target" ] && exit 0
+dirty=$(git status --porcelain --untracked-files=no)
+# Up to date, or ahead of origin after a hand deploy (a git bundle) that origin has not caught up with yet.
+# A failed status left over from an earlier round no longer applies: the running version is current. Hand
+# edits keep it, so they stay visible on the factory page.
+if [ "$current" = "$target" ] || git merge-base --is-ancestor "$target" "$current"; then
+    if [ -z "$dirty" ] && grep -q '"state": "failed"' "$STATUS" 2>/dev/null; then
+        status updated "$current" "$current" "Up to date"
+    fi
+    exit 0
+fi
 if grep -qx "$target" "$BAD"; then
     exit 0
 fi
-if [ -n "$(git status --porcelain --untracked-files=no)" ] || ! git merge-base --is-ancestor "$current" "$target"; then
+if [ -n "$dirty" ] || ! git merge-base --is-ancestor "$current" "$target"; then
     status failed "$target" "$current" "Not a fast-forward or the checkout has local edits; update by hand"
     exit 1
 fi
 
 echo "$(date -Is) update $current -> $target" >>"$LOG"
-status updating "$target" "$current" "Building and starting the new version"
+status updating "$target" "$current" "Building the new version"
+git merge -q --ff-only "$target"
+# Build while the factory keeps working: a build restarts nothing, and a failed one (PyPI or Docker Hub
+# down) used to hold all new work for every retry round.
+if ! build; then
+    # Nothing was restarted: go back to the running version's sources and try again next round.
+    if ! back_to "$current"; then
+        status failed "$target" "$current" "Build failed, and hand edits made during the update stop the return to $current; update by hand"
+        exit 1
+    fi
+    status failed "$target" "$current" "Build failed (retried); the running version is untouched. $(tail -n 20 "$LOG")"
+    exit 1
+fi
+status updating "$target" "$current" "Waiting for running steps, then starting the new version"
 touch "$SYSTEM/hold"
 # New work is held; let running agent steps finish so a restart does not cut them off mid-run.
 idle_until=$(($(date +%s) + ${DARKFACTORY_UPDATE_IDLE_WAIT:-2400}))
@@ -103,14 +131,6 @@ while [ -n "$(docker ps -q --filter name=df-task-)" ] && [ "$(date +%s)" -lt "$i
     sleep 20
 done
 started=$(date +%s)
-git merge -q --ff-only "$target"
-if ! build; then
-    # Nothing was restarted: go back to the running version's sources and try again next round.
-    git reset -q --hard "$current"
-    rm -f "$SYSTEM/hold"
-    status failed "$target" "$current" "Build failed (retried); the running version is untouched. $(tail -n 20 "$LOG")"
-    exit 1
-fi
 if deploy && rm -f "$SYSTEM/hold" && healthy "$started"; then
     status updated "$target" "$current" "Healthy after the update"
     echo "$(date -Is) healthy at $target" >>"$LOG"
@@ -121,7 +141,11 @@ echo "$(date -Is) unhealthy at $target, rolling back to $current" >>"$LOG"
 echo "$target" >>"$BAD"
 reason=$(tail -n 30 "$LOG")
 touch "$SYSTEM/hold"
-git reset -q --hard "$current"
+if ! back_to "$current"; then
+    rm -f "$SYSTEM/hold"
+    status failed "$target" "$current" "Unhealthy, and hand edits made during the update stop the rollback to $current; needs a human. $reason"
+    exit 1
+fi
 started=$(date +%s)
 if build && deploy && rm -f "$SYSTEM/hold" && healthy "$started"; then
     status rolled_back "$target" "$current" "The new version was unhealthy; back on the previous one. $reason"
