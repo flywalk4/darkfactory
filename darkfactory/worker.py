@@ -157,6 +157,23 @@ def without_later(message):
         return message
 
 
+def checks_mutation(repo, output=""):
+    """A failed result when the checks left tracked files changed: the writer needs the paths to fix it."""
+    changed = repo.git("diff", "--name-only", "HEAD", cwd=repo.work, check=False).stdout.split()
+    if not changed:
+        return None
+    text = "Required checks modified tracked source files:\n" + "\n".join(changed[:20])
+    if len(changed) > 20:
+        text += f"\n… and {len(changed) - 20} more"
+    text += (
+        "\n.git is read-only in the sandbox, so `git checkout` cannot restore them inside a check: "
+        "keep tests from writing tracked files, or copy them aside and back."
+    )
+    if output:
+        text += "\n\nCheck output:\n" + output[-2000:]
+    return {"status": "checks_failed", "text": text}
+
+
 def unbacked_claims(repo, claimed):
     """The writer's handoff names files its commit does not change. An empty change is left to review: the
     work may already be in preprod."""
@@ -993,11 +1010,7 @@ class Worker:
                     lambda: beat(),
                     max(1, task.execution_deadline - now()),
                 )
-                if repo.git("diff", "--quiet", "HEAD", cwd=repo.work, check=False).returncode:
-                    checked = {
-                        "status": "checks_failed",
-                        "text": "Required checks modified tracked source files",
-                    }
+                checked = checks_mutation(repo, checked.get("text", "")) or checked
                 (repo.artifacts / "checks.txt").write_text(checked.get("text", ""))
                 result.update(checked)
             elif phase == "collect":
@@ -1098,11 +1111,7 @@ class Worker:
                         result = self.executor.run(task, project, connection, role, lambda: beat(), remaining)
                 if phase in {"checks", "verify"}:
                     (repo.artifacts / "checks.txt").write_text(result.get("text", ""))
-                    if repo.git("diff", "--quiet", "HEAD", cwd=repo.work, check=False).returncode:
-                        result = {
-                            "status": "checks_failed",
-                            "text": "Required checks modified tracked source files",
-                        }
+                    result = checks_mutation(repo, result.get("text", "")) or result
                     if phase == "verify" and initialization.active(task) and result.get("status") == "ok":
                         try:
                             initialization.documents(repo, task.candidate_sha)

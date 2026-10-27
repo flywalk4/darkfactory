@@ -644,3 +644,18 @@ def test_publish_explains_a_task_branch_moved_outside_the_factory(publish_reposi
         repo.publish(repo.commit())
     remote = Path(repo.project.remote)
     assert repo.git("rev-parse", f"refs/heads/{repo.task.branch}", cwd=remote) == manual
+
+
+def test_checks_mutation_names_changed_files_and_keeps_check_output(publish_repository):
+    from darkfactory.worker import checks_mutation
+
+    repo = publish_repository
+    (repo.work / "fixture.json").write_text("{}\n")
+    repo.commit()
+    assert checks_mutation(repo, "all passed") is None
+    (repo.work / "fixture.json").write_text('{"rewritten": true}\n')
+    result = checks_mutation(repo, "pytest output tail")
+    assert result["status"] == "checks_failed"
+    assert "fixture.json" in result["text"]
+    assert "read-only" in result["text"]
+    assert result["text"].endswith("pytest output tail")
