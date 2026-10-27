@@ -95,7 +95,17 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ] || ! git merge-base -
 fi
 
 echo "$(date -Is) update $current -> $target" >>"$LOG"
-status updating "$target" "$current" "Building and starting the new version"
+status updating "$target" "$current" "Building the new version"
+git merge -q --ff-only "$target"
+# Build while the factory keeps working: a build restarts nothing, and a failed one (PyPI or Docker Hub
+# down) used to hold all new work for every retry round.
+if ! build; then
+    # Nothing was restarted: go back to the running version's sources and try again next round.
+    git reset -q --hard "$current"
+    status failed "$target" "$current" "Build failed (retried); the running version is untouched. $(tail -n 20 "$LOG")"
+    exit 1
+fi
+status updating "$target" "$current" "Waiting for running steps, then starting the new version"
 touch "$SYSTEM/hold"
 # New work is held; let running agent steps finish so a restart does not cut them off mid-run.
 idle_until=$(($(date +%s) + ${DARKFACTORY_UPDATE_IDLE_WAIT:-2400}))
@@ -103,14 +113,6 @@ while [ -n "$(docker ps -q --filter name=df-task-)" ] && [ "$(date +%s)" -lt "$i
     sleep 20
 done
 started=$(date +%s)
-git merge -q --ff-only "$target"
-if ! build; then
-    # Nothing was restarted: go back to the running version's sources and try again next round.
-    git reset -q --hard "$current"
-    rm -f "$SYSTEM/hold"
-    status failed "$target" "$current" "Build failed (retried); the running version is untouched. $(tail -n 20 "$LOG")"
-    exit 1
-fi
 if deploy && rm -f "$SYSTEM/hold" && healthy "$started"; then
     status updated "$target" "$current" "Healthy after the update"
     echo "$(date -Is) healthy at $target" >>"$LOG"

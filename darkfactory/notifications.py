@@ -334,7 +334,7 @@ def _completion_message(db, task, message):
     from .promotions import proposal
 
     if proposal(db, task):
-        lines.append("Влить в main / отклонить: " + task_url(task) + "&promotion=1")
+        lines.append(f"Влить в {project.seed_branch} / отклонить: " + task_url(task) + "&promotion=1")
     return "\n".join(lines)
 
 

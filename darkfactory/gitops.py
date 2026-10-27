@@ -257,12 +257,18 @@ class Repository:
             "rev-parse", "--verify", f"refs/heads/{self.project.target}", cwd=self.mirror, check=False
         )
         if target.returncode:
-            seed = self.git(
-                "rev-parse", "--verify", f"refs/heads/{self.project.seed_branch}", cwd=self.mirror
-            )
+            seed = self._seed_head()
             self.git("push", "origin", f"{seed}:refs/heads/{self.project.target}", cwd=self.mirror)
             self.git("fetch", "origin", "+refs/heads/*:refs/heads/*", cwd=self.mirror)
         return self.git("rev-parse", f"refs/heads/{self.project.target}", cwd=self.mirror)
+
+    def _seed_head(self):
+        """The project's seed branch in the mirror; promotion never creates it on the remote."""
+        branch = self.project.seed_branch
+        found = self.git("rev-parse", "--verify", f"refs/heads/{branch}", cwd=self.mirror, check=False)
+        if found.returncode:
+            raise GitError(f"Ветки {branch} нет в удалённом репозитории; проверь исходную ветку проекта")
+        return found.stdout.strip()
 
     def prepare(self):
         target = self.refresh()
@@ -592,13 +598,13 @@ class Repository:
         return result.returncode == 0
 
     def main_preview(self, sha):
-        """Inspect a frozen, already accepted commit; never move a branch on preview."""
+        """Inspect a frozen, already accepted commit against the seed branch; never move a branch on preview."""
         with self._mirror_lock():
             self._refresh_locked()
             return self._main_preview_locked(sha)
 
     def _main_preview_locked(self, sha):
-        main = self.git("rev-parse", "--verify", "refs/heads/main", cwd=self.mirror)
+        main = self._seed_head()
         self.git("cat-file", "-e", sha + "^{commit}", cwd=self.mirror)
         fast_forward = not self.git(
             "merge-base", "--is-ancestor", main, sha, cwd=self.mirror, check=False
@@ -693,7 +699,10 @@ class Repository:
         result = self.git("merge", "--no-edit", "--no-ff", sha, cwd=self.work, check=False)
         self.own_files()
         if result.returncode and not self._pending_merge():
-            raise GitError("Слияние main в preprod не началось: " + (result.stderr or result.stdout)[-500:])
+            raise GitError(
+                f"Слияние {self.project.seed_branch} в preprod не началось: "
+                + (result.stderr or result.stdout)[-500:]
+            )
         return self._conflict_guidance()
 
     def promote_main(self, sha, expected_main):
@@ -703,10 +712,11 @@ class Repository:
             preview = self._main_preview_locked(sha)
             if preview["already_merged"]:
                 return preview["main_sha"]
+            branch = self.project.seed_branch
             if preview["main_sha"] != expected_main:
-                raise GitError("Ветка main изменилась; заново открой предложение слияния")
+                raise GitError(f"Ветка {branch} изменилась; заново открой предложение слияния")
             if not preview["can_merge"]:
-                raise GitError("Конфликт main и preprod: " + ", ".join(preview["conflicts"][:10]))
+                raise GitError(f"Конфликт {branch} и preprod: " + ", ".join(preview["conflicts"][:10]))
             target = sha
             if preview["mode"] == "merge":
                 target = self.git(
@@ -717,14 +727,14 @@ class Repository:
                     "-p",
                     sha,
                     "-m",
-                    f"Merge preprod {sha[:12]} into main",
+                    f"Merge preprod {sha[:12]} into {branch}",
                     cwd=self.mirror,
                 )
             self.git(
                 "push",
-                f"--force-with-lease=refs/heads/main:{expected_main}",
+                f"--force-with-lease=refs/heads/{branch}:{expected_main}",
                 "origin",
-                f"{target}:refs/heads/main",
+                f"{target}:refs/heads/{branch}",
                 cwd=self.mirror,
             )
             return target
