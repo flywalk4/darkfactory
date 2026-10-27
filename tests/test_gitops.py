@@ -587,3 +587,60 @@ def test_tidy_keeps_run_output_out_of_the_commit(publish_repository):
     tree = publish_repository.git("ls-tree", "-r", "--name-only", sha, cwd=publish_repository.work).split()
     assert not set(junk) & set(tree) and set(kept) <= set(tree)
     assert (publish_repository.artifacts / "run-output" / "npm-ci.log").is_file()
+
+
+def _push_outside_factory(repo, branch, name):
+    """A person's commit on top of the remote branch, pushed from a separate clone."""
+    clone = repo.work.parent / f"person-{name}"
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "clone", "-b", branch, repo.project.remote, str(clone)], env=env, check=True)
+    (clone / f"{name}.txt").write_text("manual change\n")
+    for args in (
+        ["add", "."],
+        ["-c", "user.name=Person", "-c", "user.email=person@localhost", "commit", "-m", "Manual change"],
+        ["push", "origin", branch],
+    ):
+        subprocess.run(["git", *args], cwd=clone, env=env, capture_output=True, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=clone, env=env, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_merge_keeps_task_branch_with_commits_pushed_outside_the_factory(publish_repository):
+    repo = publish_repository
+    repo.project.forge = "git"
+    target = repo.head()
+    (repo.work / "changed.txt").write_text("factory change\n")
+    sha = repo.commit()
+    repo.publish(sha)
+    manual = _push_outside_factory(repo, repo.task.branch, "manual")
+    assert repo.merge(sha, target)
+    remote = Path(repo.project.remote)
+    assert repo.git("rev-parse", "refs/heads/preprod", cwd=remote) == sha
+    assert repo.git("rev-parse", f"refs/heads/{repo.task.branch}", cwd=remote) == manual
+
+
+def test_merge_drops_task_branch_fully_contained_in_preprod(publish_repository):
+    repo = publish_repository
+    repo.project.forge = "git"
+    target = repo.head()
+    (repo.work / "changed.txt").write_text("factory change\n")
+    sha = repo.commit()
+    repo.publish(sha)
+    assert repo.merge(sha, target)
+    remote = Path(repo.project.remote)
+    missing = repo.git("rev-parse", "--verify", f"refs/heads/{repo.task.branch}", cwd=remote, check=False)
+    assert missing.returncode
+
+
+def test_publish_explains_a_task_branch_moved_outside_the_factory(publish_repository):
+    repo = publish_repository
+    repo.project.forge = "git"
+    (repo.work / "first.txt").write_text("first\n")
+    repo.publish(repo.commit())
+    manual = _push_outside_factory(repo, repo.task.branch, "manual")
+    (repo.work / "second.txt").write_text("second\n")
+    with pytest.raises(gitops.GitError, match="изменили вне фабрики"):
+        repo.publish(repo.commit())
+    remote = Path(repo.project.remote)
+    assert repo.git("rev-parse", f"refs/heads/{repo.task.branch}", cwd=remote) == manual
