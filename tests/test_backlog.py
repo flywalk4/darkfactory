@@ -176,3 +176,31 @@ def test_finished_notes_leave_the_backlog_after_a_day(client, setup_project, mon
     assert shown() == set(texts)
     monkeypatch.setattr(routes, "now", lambda: 1000 + backlog.KEEP_SECONDS + 1)
     assert shown() == {"Открытая", "Задача в работе"}
+
+
+def test_plan_scan_uses_constant_queries_per_project_count(client, setup_project):
+    from sqlalchemy import event
+
+    project, _ = setup_project
+    with db.transaction() as session:
+        for index in range(30):
+            session.add(
+                db.Project(org_id=project["org_id"], name=f"p{index}", remote="https://example.invalid/x.git")
+            )
+
+    def selects():
+        seen = []
+
+        def count(conn, cursor, statement, *rest):
+            seen.append(statement)
+
+        event.listen(db.engine, "before_cursor_execute", count)
+        try:
+            assert not backlog.plan(Groups(lambda _: {"groups": []}))
+        finally:
+            event.remove(db.engine, "before_cursor_execute", count)
+        return len(seen)
+
+    # Before: one query per project (about 34 here); after: a fixed handful regardless of project count.
+    n = selects()
+    assert n <= 4

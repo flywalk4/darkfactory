@@ -199,7 +199,16 @@ def plan(executor=None):
     from .execution import DockerExecutor
 
     with transaction() as db:
-        project = next((row for row in db.scalars(select(Project)) if due(db, row)), None)
+        # One query for every project with open notes instead of one `due` lookup per project.
+        open_notes = select(BacklogItem.project_id).where(BacklogItem.state == "open")
+        project = next(
+            (
+                row
+                for row in db.scalars(select(Project).where(Project.id.in_(open_notes)))
+                if state(row).get("requested")
+            ),
+            None,
+        )
         if project is None:
             return False
         items = list(
