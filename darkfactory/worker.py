@@ -1121,6 +1121,9 @@ class Worker:
                     (repo.artifacts / "checks.txt").write_text(inner.get("text", ""))
                 # A writer that stopped to ask or to split leaves its workspace as it is.
                 if phase == "implement" and result.get("status") == "ok" and not result.get("request"):
+                    # Tidy first: run output left by a check run is not the writer's change, and counting it
+                    # against the "only this file" rules burns correction cycles the writer cannot fix.
+                    tidied = repo.tidy()
                     try:
                         if initialization.active(task):
                             initialization.validate(repo)
@@ -1129,7 +1132,7 @@ class Worker:
                     except (ValueError, UnicodeError) as exc:
                         result = {"status": "checks_failed", "text": str(exc)}
                     else:
-                        if tidied := repo.tidy():
+                        if tidied:
                             listed = ", ".join(tidied[:10]) + (
                                 f" и ещё {len(tidied) - 10}" if len(tidied) > 10 else ""
                             )
