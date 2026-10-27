@@ -421,14 +421,16 @@ For employees, set a factory address reachable by them through `DARKFACTORY_PUBL
 
 ### Promoting to main
 
-When a top-level task completes, the notification also contains a **"Merge to main / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current `main` (up to 100,000 characters, with a truncation mark). The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
+Promotion carries `preprod` into the project's seed branch ("Source branch" in the project settings, `seed_branch`, `main` by default); below, `main` means that branch. A project whose seed branch is `nolang` promotes into `nolang`, and its old `main` branch never changes. If the seed branch is missing on the remote, promotion fails with an error and does not create it.
+
+When a top-level task completes, the notification also contains a **"Merge to <seed branch> / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current seed branch (up to 100,000 characters, with a truncation mark). If the seed branch moves between the preview and the merge, the merge is refused and the owner opens the proposal again. The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
 
 > [!NOTE]
 > By default there is no automatic transfer to `main`, and the Director cannot make this decision; see [Automatic promotion](#automatic-promotion) for the opt-in. A GitLab project with a deploy job deploys after the owner's merge ([below](#stand-testing-and-gitlab-deploys)). If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
 
 ### Automatic promotion
 
-An owner can let a project promote itself: set **"Automatic promotion after a soak, hours"** (`auto_promote_hours`, `0` = only by hand) and add an **"Automatic promotion of preprod into main"** [schedule](#schedules). When the schedule fires, the newest accepted `preprod` goes to `main` only if:
+An owner can let a project promote itself: set **"Automatic promotion after a soak, hours"** (`auto_promote_hours`, `0` = only by hand) and add an **"Automatic promotion of preprod into <seed branch>"** [schedule](#schedules). When the schedule fires, the newest accepted `preprod` goes to the project's seed branch (`main` by default) only if:
 
 - it was accepted at least `auto_promote_hours` ago and no preprod incident happened since then;
 - the last preprod check is healthy and the usual promotion guards pass;
@@ -442,7 +444,7 @@ The promotion is recorded as the factory's decision on the task, and a GitLab de
 
 ### Syncing main back into preprod
 
-The reverse direction is automatic: on the project's **"Merge main into preprod"** [schedule](#schedules) (hourly by default; `DARKFACTORY_MAIN_SYNC_SECONDS=0` turns syncing off for the installation) the factory merges new `main` commits into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with `main`; otherwise a merge commit is created. On conflict, a task "Merge main into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
+The reverse direction is automatic: on the project's **"Merge <seed branch> into preprod"** [schedule](#schedules) (hourly by default; `DARKFACTORY_MAIN_SYNC_SECONDS=0` turns syncing off for the installation) the factory merges new commits of the project's seed branch (`main` by default) into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with the seed branch; otherwise a merge commit is created. On conflict, a task "Merge <seed branch> into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
 
 ## Limits and incidents
 
@@ -532,7 +534,7 @@ The schedule row shows the last build and the share built and mean scores over t
 
 ### GitLab deploys
 
-For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in the `main` pipeline (for example `deploy`). A project with GitLab MRs uses the MR server and its token; a project without them uses the API beside its HTTPS Git URL (`https://host/api/v4`) and the Git token, so it keeps working without MRs. The token needs the `api` scope and the right to run that job, including a protected environment. After the owner merges into `main` (see [Promoting to main](#promoting-to-main)), the factory:
+For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in the seed branch pipeline (`main` by default) (for example `deploy`). A project with GitLab MRs uses the MR server and its token; a project without them uses the API beside its HTTPS Git URL (`https://host/api/v4`) and the Git token, so it keeps working without MRs. The token needs the `api` scope and the right to run that job, including a protected environment. After the owner merges into the seed branch (see [Promoting to main](#promoting-to-main)), the factory:
 
 1. finds the pipeline of the new `main` commit;
 2. waits until the jobs of the `build` stage finish, so the images of the commit exist;
@@ -551,7 +553,7 @@ The **"Schedules"** page of a project lists its recurring jobs. Each schedule ha
 | Stand testing | asks the [stand tester](#stand-tester) for a run; skipped while 8 stand bugs are open |
 | Build an app on the stand | asks the tester for a [stand build](#stand-builds) |
 | Backlog into tasks | groups the open backlog notes into tasks; nothing happens without new notes |
-| Merge main into preprod | [syncs `main` into `preprod`](#syncing-main-back-into-preprod) |
+| Merge <seed branch> into preprod | [syncs the seed branch (`main` by default) into `preprod`](#syncing-main-back-into-preprod) |
 | Factory failure report (`self_report`) | queues a background scan of failures across the organization into the backlog of a project marked **This project is the factory** (`factory_self`) |
 | Task | creates an ordinary task with the saved title, request and priority; skipped while the task of the previous run is still open |
 

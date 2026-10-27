@@ -7,7 +7,7 @@ const LANGUAGES = [
   ['en', 'English'], ['zh', '中文'], ['hi', 'हिन्दी'], ['es', 'Español'], ['ar', 'العربية'],
   ['fr', 'Français'], ['bn', 'বাংলা'], ['pt', 'Português'], ['ru', 'Русский'], ['ja', '日本語'],
 ];
-const LOCALE_VERSION = '20261026-i18n';
+const LOCALE_VERSION = '20261027-seed';
 const LANG = (() => {
   let stored = null;
   try { stored = localStorage.getItem('df-lang'); } catch {}
