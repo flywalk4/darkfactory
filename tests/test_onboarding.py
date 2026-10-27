@@ -8,11 +8,11 @@ from darkfactory import onboarding
 from darkfactory.onboarding import LoginFlow
 
 
-def wait_for(flow, statuses):
+def wait_for(flow, statuses, ready=lambda result: True):
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         result = flow.snapshot()
-        if result["status"] in statuses:
+        if result["status"] in statuses and ready(result):
             return result
         time.sleep(0.01)
     flow.cancel()
@@ -67,7 +67,8 @@ def test_codex_reads_only_isolated_result_and_returns_secret_once(tmp_path, monk
     )
     flow = LoginFlow("codex", tmp_path, personal_mode=True)
     flow.start()
-    waiting = wait_for(flow, {"waiting"})
+    # The link and the code are printed separately, so the code may follow the first "waiting" snapshot.
+    waiting = wait_for(flow, {"waiting"}, lambda result: result["user_code"])
     assert waiting["verification_url"] == "https://auth.openai.com/codex/device"
     assert waiting["user_code"] == "ABCD-EFGH"
     result = wait_for(flow, {"done", "failed"})
@@ -81,6 +82,7 @@ def test_codex_reads_only_isolated_result_and_returns_secret_once(tmp_path, monk
     }
     assert flow.take_credentials() is None
     assert not (tmp_path / "codex" / "auth.json").exists()
+    flow._thread.join(5)
     assert not flow._buffer
 
 
@@ -111,6 +113,7 @@ def test_claude_pty_manual_code_and_secret_redaction(tmp_path, monkeypatch):
     assert "callback-code" not in json.dumps(result)
     assert flow.take_credentials() == {"oauth_token": token}
     assert flow.take_credentials() is None
+    flow._thread.join(5)
     assert not flow._buffer
 
 
@@ -166,6 +169,7 @@ def test_output_overflow_fails_and_private_urls_are_not_exposed(tmp_path, monkey
     assert "sensitive" not in json.dumps(result)
     assert "secret" not in json.dumps(result)
     assert flow.take_credentials() is None
+    flow._thread.join(5)
     assert not flow._buffer
 
 

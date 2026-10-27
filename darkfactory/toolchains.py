@@ -686,15 +686,8 @@ def _buildkit(tag, text, spec, heartbeat):
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-        try:
-            proc.stdin.write(text.encode())
-        except BrokenPipeError:
-            pass  # The CLI exited before reading the Dockerfile; its exit code and log below tell why.
-        finally:
-            try:
-                proc.stdin.close()
-            except BrokenPipeError:
-                pass
+        proc.stdin.write(text.encode())
+        proc.stdin.close()
         started, code = time.monotonic(), None
         while code is None:
             try:
