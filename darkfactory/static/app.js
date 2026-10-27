@@ -65,10 +65,11 @@ function collapseNav(collapsed){document.body.classList.toggle('nav-collapsed',c
 $('#collapse-nav').onclick=()=>{const collapsed=!document.body.classList.contains('nav-collapsed');remember('df-nav-collapsed',collapsed?'1':'');collapseNav(collapsed);};collapseNav(remembered('df-nav-collapsed')==='1');
 $('#logout').onclick=()=>{sessionStorage.removeItem('df-token');location.reload();};
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{remember('df-view',button.dataset.view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));for(const view of ['board','factory','backlog','schedules','settings','agents','artifacts'])$('#'+view+'-view').hidden=button.dataset.view!==view;if(button.dataset.view==='settings') settings().catch(e=>toast(e.message));if(button.dataset.view==='agents')agentsPage().catch(e=>toast(e.message));if(button.dataset.view==='artifacts')registryPage().catch(e=>toast(e.message));if(button.dataset.view==='backlog')backlogPage().catch(e=>toast(e.message));if(button.dataset.view==='schedules')schedulesPage().catch(e=>toast(e.message));if(button.dataset.view==='factory')factoryPage().catch(e=>toast(e.message));});
-let loadSeq=0,renderedBoard='',renderedProjects='';
-async function load() {
+let loadSeq=0,renderedProjects='',pollTick=0;
+// Polls pass full=false: projects and pools are refetched only on explicit loads and every few ticks.
+async function load({full=true}={}) {
   const seq=++loadSeq;
-  const [nextProjects,nextPools]=await Promise.all([api('/projects'),api('/pools')]);
+  const [nextProjects,nextPools]=full||!projects.length?await Promise.all([api('/projects'),api('/pools')]):[projects,poolList];
   if(seq!==loadSeq)return;
   projects=nextProjects;poolList=nextPools;
   if(!projects.some(p=>p.id===projectId)) projectId=projects[0]?.id||'';remember('df-project',projectId);
@@ -79,8 +80,7 @@ async function load() {
   $('#new-incident').disabled=$('#new-task').disabled=!project;$('#empty').hidden=!!project;$('#board').hidden=!project;$('#metrics').hidden=!project;$('.board-heading').hidden=!project;
   const [nextTasks,nextConnections]=project?await Promise.all([api(`/projects/${project.id}/tasks`),api('/connections').catch(()=>null)]):[[],null];
   if(seq!==loadSeq||projectId!==(project?.id||''))return;
-  const boardKey=JSON.stringify([projectId,nextTasks,nextConnections]);
-  if(boardKey!==renderedBoard){renderedBoard=boardKey;taskList=nextTasks;boardConnections=nextConnections;renderBoard();}
+  taskList=nextTasks;boardConnections=nextConnections;renderBoard();
   if(!$('#settings-view').hidden) await settings();
   if(!$('#artifacts-view').hidden) await registryPage();
   if(!$('#backlog-view').hidden&&!$('#backlog-text')?.value) await backlogPage();
@@ -106,7 +106,7 @@ function renderBoard() {
   const quota=boardConnections===null?'—':!ready.length?tr('нет'):left.length?Math.max(...left)+'%':'?';
   const counts=[[tr('В работе'),taskList.filter(t=>['running','recovering'].includes(t.state)).length,'●',''],[tr('Ждут решения'),taskList.filter(t=>['needs_human','review_required'].includes(t.state)).length,'◇',''],[tr('Зависли'),stalled,'⚠',stalled?'metric-alert':''],
     [tr('Квота'),quota,poolWait?tr('ждут: {n}',{n:poolWait}):tr('{n} подкл.',{n:ready.length}),poolWait||(boardConnections&&!ready.length)?'metric-alert':'']];
-  $('#metrics').innerHTML=counts.map(([label,count,note,cls])=>`<div class="metric ${cls}"><span>${label}</span><strong>${count}</strong><em>${note}</em></div>`).join('');$('#task-count').textContent=topLevel.length===taskList.length?taskList.length:tr('{shown} из {total}',{shown:topLevel.length,total:taskList.length});renderBoardFilters();
+  const metricsHtml=counts.map(([label,count,note,cls])=>`<div class="metric ${cls}"><span>${label}</span><strong>${count}</strong><em>${note}</em></div>`).join('');if($('#metrics').innerHTML!==metricsHtml)$('#metrics').innerHTML=metricsHtml;$('#task-count').textContent=topLevel.length===taskList.length?taskList.length:tr('{shown} из {total}',{shown:topLevel.length,total:taskList.length});renderBoardFilters();
   renderMainPending(taskList);
   renderAttention(taskList);
   const card=t=>`<div class="card-group"><button class="card" data-task="${t.id}"><div class="card-id"><span>DF-${t.id.slice(0,6).toUpperCase()}</span><span class="card-author" title="${t.author?tr('Поставил(а): {name}',{name:esc(t.author)}):tr('Поставила фабрика')}">${t.incident?tr('ИНЦИДЕНТ')+' · ':''}${esc(t.author||tr('фабрика'))}</span></div>${t.parent_id&&byId[t.parent_id]?`<span class="card-parent" role="link" tabindex="0" data-open-parent="${t.parent_id}" title="${tr('Открыть родительскую задачу')}">↖ ${esc(byId[t.parent_id].title)}</span>`:''}<h3>${esc(t.title)}</h3><span class="card-tag">${esc(stateLabel(t))}</span> <span class="card-tag task-priority-${esc(t.priority||'normal')}">${esc(priorityLabel(t.priority))}</span>${t.role_config?.tier==='light'?'<span class="tier-light" title="'+tr('Лёгкая подзадача: дешёвая модель, любая свободная подписка')+'">'+tr('лёгкая')+'</span>':''}${t.promotion_pending?'<span class="main-badge" title="'+tr('Слито в preprod, ждёт твоего решения о переносе в {branch}',{branch:esc(seedBranch())})+'">→ '+esc(seedBranch())+'</span>':''}${t.reason?`<div class="card-reason">${esc(reasonLabel(t.reason))}</div>`:t.waiting_for?`<div class="card-reason">${esc(tr('Ждёт {name}',{name:t.waiting_for}))}</div>`:''}${t.branch&&t.state!=='done'?`<div class="card-branch" title="${tr('Ветка агента')}"><code>${esc(t.branch)}</code></div>`:''}${activityLabel(t)?`<div class="card-activity${activityLabel(t).stalled?' stalled':''}">${esc(activityLabel(t).text)}</div>`:''}<div class="card-bottom"><span class="agent">${esc(phases[t.phase]||t.phase)}</span><span>${tr('{n} мин · {count} исправл.',{n:Math.round(t.active_seconds/60),count:t.corrections})}</span></div></button>${childRows(t,childrenOf)}</div>`;
@@ -468,7 +468,7 @@ async function showBrowserEvidence(id) {
 }
 function diskWarning(d,held){const box=$('#disk-warning');if(!box)return;const show=d&&d.paused;box.hidden=!show&&!held;box.classList.toggle('hold-warning',!show&&!!held);if(!show&&held)box.innerHTML='<b>'+tr('Пауза перед обновлением фабрики')+'</b> · '+tr('новые задачи не стартуют, начатые шаги доделываются.');if(show)box.innerHTML=`<b>${d.alert?tr('Диск почти заполнен'):tr('Мало места на диске')}</b> · ${tr('свободно {gb} ГБ ({percent}%). Новые задачи на паузе, пока не освободится место в Docker.',{gb:(d.free_bytes/1024**3).toFixed(1),percent:Math.round(d.free_percent)})}`;}
 // A background tab is not polled; it catches up the moment it becomes visible again.
-async function poll(){if(!token||$('#shell').hidden||refreshBusy||$('#modal').open||document.hidden)return;refreshBusy=true;try{api('/me').then(me=>diskWarning(me.disk,me.held)).catch(()=>{});await load();if(detailId&&$('#detail').open)await showDetail(detailId);}catch(e){console.warn(e.message);}finally{refreshBusy=false;}}
+async function poll(){if(!token||$('#shell').hidden||refreshBusy||$('#modal').open||document.hidden)return;refreshBusy=true;try{api('/me').then(me=>diskWarning(me.disk,me.held)).catch(()=>{});await load({full:++pollTick%6===0});if(detailId&&$('#detail').open)await showDetail(detailId);}catch(e){console.warn(e.message);}finally{refreshBusy=false;}}
 setInterval(poll,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 if(token)login().catch(e=>toast(e.message));
 

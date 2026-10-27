@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 from darkfactory import db, service
@@ -98,11 +99,52 @@ def test_board_names_who_asked_for_each_task(client, setup_project):
     assert board["factory1"]["created_by"] is None and board["factory1"]["author"] is None
 
 
-def test_board_load_drops_responses_of_a_previous_project_or_load():
-    source = (Path(__file__).parent.parent / "darkfactory" / "static" / "app.js").read_text()
-    body = source[source.index("async function load()") : source.index("const openParents")]
-    assert "const seq=++loadSeq" in body
-    # A late reply must not touch the list once another load started or the project changed.
-    assert "if(seq!==loadSeq||projectId!==(project?.id||''))return;" in body
-    assert body.index("return;") < body.index("taskList=nextTasks")
-    assert "/projects/${project.id}/tasks" in body
+LOAD_HARNESS = r"""
+const source = require('fs').readFileSync(process.argv[2], 'utf8');
+const body = source.slice(source.indexOf('let loadSeq='), source.indexOf('const openParents'));
+let projectId = 'A', projects = [], poolList = [], taskList = [], boardConnections = null;
+const calls = [], renders = [], pending = {}, nodes = {};
+const $ = s => nodes[s] ||= {hidden: true, textContent: '', innerHTML: ''};
+const document = {querySelector: () => ({click() {}}), querySelectorAll: () => [], body: {classList: {contains: () => false}}};
+const tr = s => s, esc = s => s, remember = () => {}, collapseNav = () => {}, toast = () => {};
+const renderBoard = () => renders.push(taskList.map(t => t.id));
+const data = {'/projects': [{id: 'A', name: 'A', checks: []}, {id: 'B', name: 'B', checks: []}], '/pools': [], '/connections': []};
+function api(path) {
+  calls.push(path);
+  const match = path.match(/^\/projects\/(\w+)\/tasks$/);
+  if (!match) return Promise.resolve(data[path]);
+  const tasks = [{id: match[1] + '1', project_id: match[1]}];
+  // The first request for project A hangs until the test releases it.
+  if (match[1] === 'A' && !pending.A) return new Promise(resolve => { pending.A = () => resolve(tasks); });
+  return Promise.resolve(tasks);
+}
+const tick = () => new Promise(resolve => setTimeout(resolve));
+eval(body + `
+(async () => {
+  const slow = load();
+  while (!pending.A) await tick();
+  projectId = 'B';
+  await load();
+  pending.A();
+  await slow;
+  const afterSwitch = {projectId, tasks: taskList.map(t => t.project_id), renders: renders.slice()};
+  calls.length = 0;
+  await load({full: false});
+  console.log(JSON.stringify({...afterSwitch, pollCalls: calls}));
+})();`);
+"""
+
+
+def test_board_load_keeps_only_the_new_project_when_the_switch_happens_mid_request(tmp_path):
+    # Runs the real load() from app.js: project A's /tasks reply arrives after the switch to B.
+    app = Path(__file__).parent.parent / "darkfactory" / "static" / "app.js"
+    harness = tmp_path / "harness.cjs"
+    harness.write_text(LOAD_HARNESS)
+    run = subprocess.run(["node", str(harness), str(app)], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    result = json.loads(run.stdout)
+    assert result["projectId"] == "B"
+    assert result["tasks"] == ["B"]
+    assert result["renders"] == [["B1"]]
+    # A poll refreshes only the board data, not the project and pool lists.
+    assert sorted(result["pollCalls"]) == ["/connections", "/projects/B/tasks"]
