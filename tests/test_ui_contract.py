@@ -124,13 +124,15 @@ eval(body + `
   const slow = load();
   while (!pending.A) await tick();
   projectId = 'B';
-  await load();
+  const switchStart = calls.length;
+  await load({projects: false, pools: false});
+  const switchCalls = calls.slice(switchStart);
   pending.A();
   await slow;
   const afterSwitch = {projectId, tasks: taskList.map(t => t.project_id), renders: renders.slice()};
   calls.length = 0;
-  await load({full: false});
-  console.log(JSON.stringify({...afterSwitch, pollCalls: calls}));
+  await load({pools: false});
+  console.log(JSON.stringify({...afterSwitch, switchCalls, pollCalls: calls}));
 })();`);
 """
 
@@ -147,7 +149,9 @@ def test_board_load_keeps_only_the_new_project_when_the_switch_happens_mid_reque
     assert result["tasks"] == ["B"]
     # The board is emptied on each switch before the reply, and project A's cards never render.
     assert result["renders"] == [[], [], ["B1"]]
-    # A poll and a project click refresh only the board data, not the project and pool lists.
-    assert sorted(result["pollCalls"]) == ["/connections", "/projects/B/tasks"]
+    # A project click refreshes only the board data; a poll also refreshes projects, not pools.
+    assert sorted(result["switchCalls"]) == ["/connections", "/projects/B/tasks"]
+    assert sorted(result["pollCalls"]) == ["/connections", "/projects", "/projects/B/tasks"]
     app_source = app.read_text()
-    assert "click();load({full:false})" in app_source
+    assert "click();load({projects:false,pools:false})" in app_source
+    assert "await load({pools:++pollTick%6===0})" in app_source

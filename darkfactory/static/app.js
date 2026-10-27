@@ -66,15 +66,15 @@ $('#collapse-nav').onclick=()=>{const collapsed=!document.body.classList.contain
 $('#logout').onclick=()=>{sessionStorage.removeItem('df-token');location.reload();};
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{remember('df-view',button.dataset.view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));for(const view of ['board','factory','backlog','schedules','settings','agents','artifacts'])$('#'+view+'-view').hidden=button.dataset.view!==view;if(button.dataset.view==='settings') settings().catch(e=>toast(e.message));if(button.dataset.view==='agents')agentsPage().catch(e=>toast(e.message));if(button.dataset.view==='artifacts')registryPage().catch(e=>toast(e.message));if(button.dataset.view==='backlog')backlogPage().catch(e=>toast(e.message));if(button.dataset.view==='schedules')schedulesPage().catch(e=>toast(e.message));if(button.dataset.view==='factory')factoryPage().catch(e=>toast(e.message));});
 let loadSeq=0,renderedProjects='',pollTick=0,boardProject='';
-// Polls and project clicks pass full=false: projects and pools are refetched only on other loads and every few poll ticks.
-async function load({full=true}={}) {
+// Project clicks reuse the loaded projects and pools; polls refetch projects every tick and pools every sixth tick.
+async function load({projects:withProjects=true,pools:withPools=true}={}) {
   const seq=++loadSeq;
-  const [nextProjects,nextPools]=full||!projects.length?await Promise.all([api('/projects'),api('/pools')]):[projects,poolList];
+  const [nextProjects,nextPools]=await Promise.all([withProjects||!projects.length?api('/projects'):projects,withPools||!projects.length?api('/pools'):poolList]);
   if(seq!==loadSeq)return;
   projects=nextProjects;poolList=nextPools;
   if(!projects.some(p=>p.id===projectId)) projectId=projects[0]?.id||'';remember('df-project',projectId);
   const projectsHtml=projects.map(p=>`<button class="project-item ${p.id===projectId?'selected':''}" data-project="${p.id}"><span class="project-icon">${esc((p.name.trim()[0]||'◆').toUpperCase())}</span><span class="nav-text">${esc(p.name)}</span></button>`).join('');
-  if(projectsHtml!==renderedProjects){renderedProjects=projectsHtml;$('#project-list').innerHTML=projectsHtml;collapseNav(document.body.classList.contains('nav-collapsed'));document.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{projectId=b.dataset.project;document.querySelector('[data-view="board"]').click();load({full:false}).catch(e=>toast(e.message));});}
+  if(projectsHtml!==renderedProjects){renderedProjects=projectsHtml;$('#project-list').innerHTML=projectsHtml;collapseNav(document.body.classList.contains('nav-collapsed'));document.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>{projectId=b.dataset.project;document.querySelector('[data-view="board"]').click();load({projects:false,pools:false}).catch(e=>toast(e.message));});}
   const project=projects.find(p=>p.id===projectId);$('#current-project').textContent=project?.name||tr('Проекты');$('#project-heading').textContent=project?.name||tr('Твоя фабрика разработки');
   $('#project-description').textContent=project?`${project.remote} · preprod · ${project.checks.length ? tr('{n} обязательных проверок',{n:project.checks.length}) : project.merge_without_checks===false ? tr('в preprod сливает человек: нет проверок') : tr('в preprod автоматически после ревью')} · ${tr('{branch} — вручную',{branch:esc(project.seed_branch)})}`:tr('Подключи первый проект, чтобы начать работу.');
   $('#new-incident').disabled=$('#new-task').disabled=!project;$('#empty').hidden=!!project;$('#board').hidden=!project;$('#metrics').hidden=!project;$('.board-heading').hidden=!project;
@@ -470,7 +470,7 @@ async function showBrowserEvidence(id) {
 }
 function diskWarning(d,held){const box=$('#disk-warning');if(!box)return;const show=d&&d.paused;box.hidden=!show&&!held;box.classList.toggle('hold-warning',!show&&!!held);if(!show&&held)box.innerHTML='<b>'+tr('Пауза перед обновлением фабрики')+'</b> · '+tr('новые задачи не стартуют, начатые шаги доделываются.');if(show)box.innerHTML=`<b>${d.alert?tr('Диск почти заполнен'):tr('Мало места на диске')}</b> · ${tr('свободно {gb} ГБ ({percent}%). Новые задачи на паузе, пока не освободится место в Docker.',{gb:(d.free_bytes/1024**3).toFixed(1),percent:Math.round(d.free_percent)})}`;}
 // A background tab is not polled; it catches up the moment it becomes visible again.
-async function poll(){if(!token||$('#shell').hidden||refreshBusy||$('#modal').open||document.hidden)return;refreshBusy=true;try{api('/me').then(me=>diskWarning(me.disk,me.held)).catch(()=>{});await load({full:++pollTick%6===0});if(detailId&&$('#detail').open)await showDetail(detailId);}catch(e){console.warn(e.message);}finally{refreshBusy=false;}}
+async function poll(){if(!token||$('#shell').hidden||refreshBusy||$('#modal').open||document.hidden)return;refreshBusy=true;try{api('/me').then(me=>diskWarning(me.disk,me.held)).catch(()=>{});await load({pools:++pollTick%6===0});if(detailId&&$('#detail').open)await showDetail(detailId);}catch(e){console.warn(e.message);}finally{refreshBusy=false;}}
 setInterval(poll,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 if(token)login().catch(e=>toast(e.message));
 
