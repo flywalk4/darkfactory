@@ -534,7 +534,7 @@ def accept_merge(db, task):
         # The merge fast-forwarded a checked preprod to a checked candidate: the new head is known healthy,
         # so the monitor does not re-run every check on it. The periodic full re-check keeps its schedule.
         project.health = {**health, "sha": task.result_sha}
-    # Factory bookkeeping (index, environment) rides to main with the next real change.
+    # Factory bookkeeping (index, environment) rides to the seed branch with the next real change.
     root = (
         not task.system_check
         and not initialization.active(task)
@@ -545,7 +545,7 @@ def accept_merge(db, task):
         db,
         task,
         "accepted",
-        "Слито в preprod. Перенос в main — вручную в карточке задачи"
+        f"Слито в preprod. Перенос в {db.get(Project, task.project_id).seed_branch} — вручную в карточке задачи"
         if root
         else "Проверенный результат слит в preprod",
         commit=task.result_sha,

@@ -1,4 +1,5 @@
-"""Manual main-branch decisions recorded in the existing durable task event journal."""
+"""Manual decisions to carry preprod into the project's seed branch (main by default), recorded in the
+durable task event journal."""
 
 import json
 import subprocess
@@ -16,10 +17,11 @@ def proposal(db, task):
     )
     if not accepted or not accepted.data.get("promotion"):
         return None
+    project = db.get(Project, task.project_id)
     result = {
         "id": accepted.id,
         "source_sha": accepted.data["commit"],
-        "target": "main",
+        "target": project.seed_branch,
         "state": "pending",
         "checks": accepted.data.get("checks"),
     }
@@ -204,7 +206,7 @@ def auto_candidate(db, project):
     merged = list(db.scalars(select(Task.id).where(Task.project_id == project.id, Task.state == "merged")))
     newest = pending(db, merged)
     if not newest:
-        return None, "Нечего переносить: main уже содержит принятый preprod"
+        return None, f"Нечего переносить: {project.seed_branch} уже содержит принятый preprod"
     task = db.get(Task, next(iter(newest)))
     current = proposal(db, task)
     accepted = db.get(Event, current["id"])
@@ -288,7 +290,7 @@ def auto_promote(force=False):
                                 db,
                                 task,
                                 "promotion_merged",
-                                "Фабрика сама влила принятый коммит в main после выдержки",
+                                f"Фабрика сама влила принятый коммит в {row.seed_branch} после выдержки",
                                 proposal_id=current["id"],
                                 commit=current["source_sha"],
                                 main_sha=main_sha,
@@ -297,7 +299,7 @@ def auto_promote(force=False):
                             from . import deploys
 
                             deploys.request(db, row, task, target, "factory")
-                            result = f"Перенесено в main: {(target or '')[:12]}"
+                            result = f"Перенесено в {row.seed_branch}: {(target or '')[:12]}"
             except BlockingIOError:
                 result = "Другая операция задачи ещё выполняется; повтор при следующем запуске"
             except (GitError, OSError, subprocess.CalledProcessError) as exc:

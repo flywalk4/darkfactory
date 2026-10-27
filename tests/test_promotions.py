@@ -347,3 +347,149 @@ def test_auto_promotion_refuses_a_leak(client, accepted, monkeypatch):
     result = auto_run(pid)
     assert result.startswith("Не перенесено: проверка утечек"), result
     assert git(item.remote, "rev-parse", "main") == item.initial
+
+
+@pytest.fixture
+def accepted_seed(client, setup_project, tmp_path):
+    """A project whose seed branch is `nolang`; the repository's `main` is an old branch that diverged."""
+    project, pool = setup_project
+    remote = seed(tmp_path)
+    source = tmp_path / "source"
+    git(source, "checkout", "-b", "nolang")
+    (source / "nolang.txt").write_text("Current development line\n")
+    git(source, "add", ".")
+    git(source, "commit", "-m", "Seed branch work")
+    git(source, "push", str(remote), "nolang")
+    git(source, "checkout", "main")
+    (source / "legacy.txt").write_text("Abandoned main line\n")
+    git(source, "add", ".")
+    git(source, "commit", "-m", "Legacy main work")
+    git(source, "push", str(remote), "main")
+    connect(client, pool, "codex", "writer")
+    connect(client, pool, "claude", "reviewer")
+    with db.transaction() as session:
+        row = session.get(db.Project, project["id"])
+        row.remote, row.seed_branch = str(remote), "nolang"
+    task = make_task(client, project)
+    result = drive(Worker(DeterministicExecutor()), task["id"])
+    assert result.state == "merged"
+    path = f"/api/tasks/{task['id']}/promotion"
+    return SimpleNamespace(
+        task=result,
+        project=project,
+        remote=remote,
+        main=git(remote, "rev-parse", "main"),
+        initial=git(remote, "rev-parse", "nolang"),
+        path=path,
+    )
+
+
+def test_promotion_moves_only_the_seed_branch(client, accepted_seed):
+    item = accepted_seed
+    preview = client.get(item.path).json()
+    assert preview["target"] == "nolang"
+    # The preview compares preprod with the seed branch, not with the abandoned main.
+    assert preview["main_sha"] == item.initial
+    assert preview["mode"] == "fast_forward" and preview["can_merge"] and not preview["conflicts"]
+    assert "+VALUE = 42" in preview["diff"] and "legacy.txt" not in preview["diff"]
+    response = client.post(item.path, json=decision(preview))
+    assert response.status_code == 200, response.text
+    assert git(item.remote, "rev-parse", "nolang") == item.task.result_sha
+    assert git(item.remote, "rev-parse", "main") == item.main
+
+
+def test_seed_branch_merge_commit_names_the_seed_branch(client, accepted_seed, tmp_path):
+    item = accepted_seed
+    external = tmp_path / "external"
+    git(tmp_path, "clone", "-b", "nolang", str(item.remote), str(external))
+    (external / "hotfix.txt").write_text("Owner hotfix\n")
+    git(external, "add", ".")
+    git(external, "commit", "-m", "Hotfix on nolang")
+    git(external, "push", "origin", "HEAD:nolang")
+    changed = git(item.remote, "rev-parse", "nolang")
+    preview = client.get(item.path).json()
+    assert preview["main_sha"] == changed and preview["mode"] == "merge" and preview["can_merge"]
+    assert "hotfix.txt" not in preview["diff"]
+    assert client.post(item.path, json=decision(preview)).status_code == 200
+    head = git(item.remote, "rev-parse", "nolang")
+    assert git(item.remote, "rev-parse", f"{head}^1") == changed
+    assert git(item.remote, "rev-parse", f"{head}^2") == item.task.result_sha
+    assert git(item.remote, "log", "-1", "--format=%s", head) == (
+        f"Merge preprod {item.task.result_sha[:12]} into nolang"
+    )
+    assert git(item.remote, "rev-parse", "main") == item.main
+
+
+def test_seed_branch_push_lease_refuses_a_concurrent_commit(client, accepted_seed, tmp_path, monkeypatch):
+    from darkfactory.gitops import Repository
+
+    item = accepted_seed
+    preview = client.get(item.path).json()
+    external = tmp_path / "concurrent"
+    git(tmp_path, "clone", "-b", "nolang", str(item.remote), str(external))
+    (external / "concurrent.txt").write_text("Must survive the promotion race\n")
+    git(external, "add", ".")
+    git(external, "commit", "-m", "Concurrent nolang")
+    concurrent_sha = git(external, "rev-parse", "HEAD")
+    original = Repository.git
+
+    def push_between_preview_and_update(self, *args, **kwargs):
+        if args[0] == "push" and any(
+            str(arg).startswith("--force-with-lease=refs/heads/nolang:") for arg in args
+        ):
+            git(external, "push", "origin", "HEAD:nolang")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Repository, "git", push_between_preview_and_update)
+    assert client.post(item.path, json=decision(preview)).status_code == 409
+    assert git(item.remote, "rev-parse", "nolang") == concurrent_sha
+    assert git(item.remote, "rev-parse", "main") == item.main
+    assert client.get(item.path).json()["state"] == "pending"
+
+
+def test_seed_branch_moved_after_preview_is_refused(client, accepted_seed, tmp_path):
+    item = accepted_seed
+    preview = client.get(item.path).json()
+    external = tmp_path / "external"
+    git(tmp_path, "clone", "-b", "nolang", str(item.remote), str(external))
+    (external / "parallel.txt").write_text("Independent change\n")
+    git(external, "add", ".")
+    git(external, "commit", "-m", "Independent nolang")
+    git(external, "push", "origin", "HEAD:nolang")
+    changed = git(item.remote, "rev-parse", "nolang")
+    response = client.post(item.path, json=decision(preview))
+    assert response.status_code == 409 and "nolang" in response.json()["detail"]
+    assert git(item.remote, "rev-parse", "nolang") == changed
+
+
+def test_missing_seed_branch_refuses_promotion_without_creating_it(client, accepted_seed):
+    item = accepted_seed
+    preview = client.get(item.path).json()
+    git(item.remote, "update-ref", "-d", "refs/heads/nolang")
+    for response in (client.get(item.path), client.post(item.path, json=decision(preview))):
+        assert response.status_code == 409
+        assert "nolang" in response.json()["detail"]
+    assert "nolang" not in git(item.remote, "branch", "--list", "nolang")
+    assert git(item.remote, "rev-parse", "main") == item.main
+
+
+def test_auto_promotion_merges_into_the_seed_branch(client, accepted_seed):
+    item = accepted_seed
+    pid = item.project["id"]
+    soak(pid, 1, age=2)
+    result = auto_run(pid)
+    assert result.startswith("Перенесено в nolang"), result
+    assert git(item.remote, "rev-parse", "nolang") == item.task.result_sha
+    assert git(item.remote, "rev-parse", "main") == item.main
+    with db.Session() as session:
+        merged = session.query(db.Event).filter_by(kind="promotion_merged").one()
+        assert "nolang" in merged.message
+
+
+def test_completion_notification_names_the_seed_branch(client, accepted_seed):
+    from darkfactory import notifications
+
+    with db.Session() as session:
+        task = session.get(db.Task, accepted_seed.task.id)
+        message = notifications._completion_message(session, task, "done")
+    assert "Влить в nolang / отклонить" in message

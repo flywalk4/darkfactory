@@ -196,3 +196,20 @@ def test_gitlab_outage_retries_before_failing(client, setup_project):
     deploys.advance(force=True, client=http)
     current = deploy_state(project["id"])
     assert current["state"] == "pipeline" and current["failures"] == 1
+
+
+def test_deploy_after_promotion_follows_the_seed_branch_pipeline(client, setup_project):
+    project = gitlab_project(client, setup_project)
+    with db.transaction() as session:
+        session.get(db.Project, project["id"]).seed_branch = "nolang"
+    task = make_task(client, project)
+    request_deploy(project["id"], task["id"])
+    gitlab = GitLab()
+    # The same commit can also run a pipeline on the old main; only the seed branch one is followed.
+    gitlab.pipelines = [
+        {"id": 8, "ref": "main", "web_url": "https://gitlab/p/8"},
+        {"id": 7, "ref": "nolang", "web_url": "https://gitlab/p/7"},
+    ]
+    http = httpx.Client(transport=httpx.MockTransport(gitlab))
+    deploys.advance(force=True, client=http)
+    assert deploy_state(project["id"])["pipeline_id"] == 7
