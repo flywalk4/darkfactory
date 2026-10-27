@@ -1730,7 +1730,7 @@ def periodic(future, pool, job):
     re-raising it on every tick would keep the scheduler from ever reaching the claim."""
     if future is not None and not future.done():
         return future
-    if future is not None and (error := future.exception()) is not None:
+    if future is not None and not future.cancelled() and (error := future.exception()) is not None:
         log.error("Background job %s failed", job.__name__, exc_info=error)
     return pool.submit(job)
 

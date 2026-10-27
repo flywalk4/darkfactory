@@ -224,6 +224,23 @@ def test_failed_background_job_is_logged_once_and_resubmitted(caplog):
     assert "Background job flaky failed" in caplog.text
 
 
+def test_cancelled_background_job_is_resubmitted_without_raising():
+    import concurrent.futures
+
+    from darkfactory import worker
+
+    def job():
+        return None
+
+    cancelled = concurrent.futures.Future()
+    cancelled.cancel()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = worker.periodic(cancelled, pool, job)
+        concurrent.futures.wait([future])
+        assert future is not cancelled
+        assert future.exception() is None
+
+
 def test_mechanical_phases_and_monitors_do_not_take_model_slots(scheduler):
     session, project, pool = scheduler
     session.get(db.Organization, project.org_id).max_active = 1
