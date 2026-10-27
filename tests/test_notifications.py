@@ -619,8 +619,12 @@ def test_jira_behind_a_down_gateway_waits_without_using_attempts(task):
     assert delivery().state == "failed"
 
 
-def test_rocket_notifications_have_emoji_avatar_without_public_url(task, monkeypatch):
-    monkeypatch.delenv("DARKFACTORY_PUBLIC_URL", raising=False)
+@pytest.mark.parametrize("public_url", [None, "http://127.0.0.1:8080", "http://localhost:8080"])
+def test_rocket_notifications_have_emoji_avatar_without_public_url(task, monkeypatch, public_url):
+    if public_url:
+        monkeypatch.setenv("DARKFACTORY_PUBLIC_URL", public_url)
+    else:
+        monkeypatch.delenv("DARKFACTORY_PUBLIC_URL", raising=False)
     channel(task, provider="rocketchat", recipient="#ops")
     enqueue(task)
     sent = []
