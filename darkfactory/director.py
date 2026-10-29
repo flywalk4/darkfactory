@@ -432,7 +432,14 @@ def release(db, row):
 def heartbeat(identifier, owner):
     with transaction() as db:
         row = db.get(Dialogue, identifier)
-        if not row or row.status != "running" or row.lease_owner != owner or row.lease_until < now():
+        if (
+            not row
+            or row.status != "running"
+            or row.lease_owner != owner
+            or row.lease_until is None
+            or row.lease_until < now()
+            or not row.credential_secret
+        ):
             return False
         try:
             service.authenticate(db, decrypt(row.credential_secret))
@@ -511,7 +518,8 @@ def prompt(state):
         "director-journal — твои же решения по остановленным задачам; open:true ждёт ответа владельца. Когда "
         "владелец отвечает про такую задачу, продолжи её через POST tasks/{id}/actions "
         '{"action":"resume","message":"<его указание>"} или отмени по его слову. '
-        "Подтянуть свежий main в preprod (хотфиксы, коммиты владельца): POST projects/{id}/main-sync с телом {}; "
+        "Подтянуть свежую исходную ветку проекта (seed_branch, обычно main) в preprod (хотфиксы, коммиты "
+        "владельца): POST projects/{id}/main-sync с телом {}; "
         "state merged — влито, up_to_date — уже актуально, conflict — создана задача на разрешение (task_id). "
         'Картинки и файлы этого чата приложи к задаче полем "chat_attachments":true в теле POST '
         "projects/{id}/tasks, tasks/{id}/actions (resume) или tasks/{id}/attachments — фабрика подставит их сама; "
@@ -519,7 +527,8 @@ def prompt(state):
         'tasks/{id}/hint {"text":"..."} — агент прочтёт по ходу; новые файлы — tasks/{id}/attachments, они сразу '
         "видны агенту. Остановленную задачу дополняй через resume с message. "
         "Не меняй лимиты, права, платный API или состояние задач без прямого поручения. Никаких production-деплоев "
-        "или merge в main. Если запрос неоднозначен, задай один вопрос и верни actions:[]. "
+        "или merge в исходную ветку проекта (seed_branch). Если запрос неоднозначен, задай один вопрос и верни "
+        "actions:[]. "
         "Без подходящей модели или доступа объясни ограничение. В конце сообщи фактические результаты.\n"
         + (
             # The project's Director profile can carry read-only MCP servers (Jira): the rule above about the

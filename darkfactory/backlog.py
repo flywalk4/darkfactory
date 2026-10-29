@@ -91,14 +91,6 @@ def request(db, project):
     project.health = {**(project.health or {}), "backlog": {**state(project), "requested": now()}}
 
 
-def due(db, project):
-    if not db.scalar(
-        select(BacklogItem.id).where(BacklogItem.project_id == project.id, BacklogItem.state == "open")
-    ):
-        return False
-    return bool(state(project).get("requested"))
-
-
 def overview(project):
     """Architecture notes from preprod help the grouper see module boundaries."""
     mirror = ROOT / "repositories" / (project.id + ".git")
@@ -199,7 +191,16 @@ def plan(executor=None):
     from .execution import DockerExecutor
 
     with transaction() as db:
-        project = next((row for row in db.scalars(select(Project)) if due(db, row)), None)
+        # One query for every project with open notes instead of one `due` lookup per project.
+        open_notes = select(BacklogItem.project_id).where(BacklogItem.state == "open")
+        project = next(
+            (
+                row
+                for row in db.scalars(select(Project).where(Project.id.in_(open_notes)))
+                if state(row).get("requested")
+            ),
+            None,
+        )
         if project is None:
             return False
         items = list(

@@ -60,7 +60,7 @@ def test_owner_manages_schedules_and_a_task_schedule_creates_one_task_at_a_time(
     project, pool = setup_project
     connect(client, pool)
     seeded = client.get(f"/api/projects/{project['id']}/schedules").json()
-    assert sorted(item["kind"] for item in seeded["items"]) == ["backlog", "main_sync"]
+    assert sorted(item["kind"] for item in seeded["items"]) == ["backlog", "lessons", "main_sync"]
 
     base = f"/api/projects/{project['id']}/schedules"
     assert (
@@ -151,3 +151,24 @@ def test_auto_promote_schedule_needs_the_setting(client, setup_project):
     assert started["queued"]
     jobs = client.get(base).json()["jobs"]
     assert jobs["auto_promote"]["requested"]
+
+
+def test_parse_is_cached_and_sparse_cron_skips_idle_months():
+    schedules.parse.cache_clear()
+    start = datetime(2026, 2, 1, tzinfo=ZoneInfo("UTC")).timestamp()
+    first = schedules.next_time("0 0 1 12 *", start)
+    assert datetime.fromtimestamp(first, ZoneInfo("UTC")) == datetime(2026, 12, 1, tzinfo=ZoneInfo("UTC"))
+    for _ in range(5):
+        schedules.next_time("0 0 1 12 *", start)
+    info = schedules.parse.cache_info()
+    assert (info.misses, info.hits) == (1, 5)
+
+
+def test_branch_jobs_name_the_seed_branch(client, setup_project):
+    project, _ = setup_project
+    with db.transaction() as session:
+        session.get(db.Project, project["id"]).seed_branch = "nolang"
+    items = client.get(f"/api/projects/{project['id']}/schedules").json()["items"]
+    sync = next(item for item in items if item["kind"] == "main_sync")
+    result = client.post(f"/api/schedules/{sync['id']}/run").json()
+    assert result["last_result"] == "Синхронизация nolang поставлена в очередь" and result["queued"]

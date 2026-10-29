@@ -293,3 +293,19 @@ def test_cancelled_dependency_is_dropped_and_its_goal_handed_over(client, setup_
         assert not session.scalars(select(db.Link).where(db.Link.task_id == task.id)).all()
         kinds = [e.kind for e in session.scalars(select(db.Event).where(db.Event.task_id == task.id))]
         assert "dependency_dropped" in kinds
+
+
+def test_duplicate_dependency_is_dropped_like_cancelled(client, setup_project):
+    project, _ = setup_project
+    source = make_task(client, project, title="Twin", request="Collect the logs.")
+    dependent = make_task(client, project)
+    link(client, dependent, source, kind="depends_on")
+    with db.transaction() as session:
+        duplicate = session.get(db.Task, source["id"])
+        duplicate.state = "duplicate"
+        duplicate.reason = "same as another task"
+        task = session.get(db.Task, dependent["id"])
+        service.release_dropped_dependencies(session, task)
+        assert "Collect the logs." in task.request
+        assert "same as another task" in task.request
+        assert not session.scalars(select(db.Link).where(db.Link.task_id == task.id)).all()

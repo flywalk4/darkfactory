@@ -263,9 +263,9 @@ def delegation_allowed(config, task):
 
 
 WRITER_NOTE = (
-    "\nYou are the writer of this task. Any read-only wording above describes the role's planning and review "
-    "work: here you must create or change the files the task requires, including reports and documents, in "
-    "/workspace. The factory commits them; an empty change fails review.\n"
+    "\nYou are the writer: read-only wording above applies to planning and review only. "
+    "Create or change the files the task requires (reports and docs too) in /workspace; "
+    "the factory commits them, an empty change fails review.\n"
 )
 
 
@@ -295,7 +295,7 @@ def mcp_prompt(profile):
     if not servers:
         return ""
     return (
-        "\nMCP servers connected to this session (call their tools directly; `codex mcp list` and MCP resource listings do not show them):\n"
+        "\nMCP servers connected (call their tools directly; `codex mcp list` does not show them):\n"
         + "".join(
             f"- {server['name']} ({'read-only' if server['read_only'] else 'read-write'}): "
             + ", ".join(server["enabled_tools"][:12])
@@ -337,12 +337,34 @@ def materialize_skills(profile, home):
 # Codex has no cheap model every account may use: ChatGPT sign-in rejects gpt-5.1-codex-mini ("not
 # supported when using Codex with a ChatGPT account"). Codex runs keep the connection's model unless a pool
 # or DARKFACTORY_LIGHT_MODEL_CODEX names one the account allows.
-LIGHT_MODELS = {"claude": "haiku"}
+LIGHT_MODELS = {"claude": "claude-haiku-5-5"}
+# The strongest model, for work where a wrong first attempt costs more than the model: see heavy().
+HEAVY_MODELS = {"claude": "claude-opus-5-5"}
 
 
 def light(task):
     """Mechanical subtasks plan and write on a cheap model; review always keeps the strong one."""
     return (task.role_config or {}).get("tier") == "light" and task.phase in ("plan", "implement")
+
+
+def heavy(task, role, risky=False):
+    """Hard work goes to the strong model: a subtask the planner marked heavy, a critical task, a writer that
+    already failed review twice, planning a large task, and reviewing a risky change."""
+    config = task.role_config or {}
+    return (
+        config.get("tier") == "heavy"
+        or getattr(task, "priority", None) == "critical"
+        or (role == "implement" and (getattr(task, "corrections", 0) or 0) >= 2)
+        or (role == "plan" and bool(config.get("plan")))
+        or (role == "review" and risky)
+    )
+
+
+def heavy_model(provider, policy=None):
+    configured = ((policy or {}).get("heavy_models") or {}).get(provider)
+    return (
+        configured or os.getenv(f"DARKFACTORY_HEAVY_MODEL_{provider.upper()}") or HEAVY_MODELS.get(provider)
+    )
 
 
 def light_model(provider, policy=None):

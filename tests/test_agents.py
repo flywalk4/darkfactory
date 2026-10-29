@@ -294,3 +294,12 @@ def test_stdio_mcp_hosts_reach_task_egress(client, setup_project, monkeypatch):
     ]
     allowed, private = seen[0]
     assert {("jira.example.com", 443), ("jira.example.com", 8443)} <= allowed & private
+
+
+def test_static_prompt_text_stays_short():
+    # Before the trim: WRITER_NOTE was 306 chars, the MCP header 150 chars; sent on every agent turn.
+    assert len(agents.WRITER_NOTE) <= 230
+    profile = {"name": "a", "instructions": "", "skill_definitions": [], "mcp_definitions": []}
+    profile["mcp_definitions"] = [{"name": "docs", "read_only": True, "enabled_tools": ["x"]}]
+    header = agents.mcp_prompt(profile).split("\n")[1]
+    assert len(header) <= 100 and "codex mcp list" in header

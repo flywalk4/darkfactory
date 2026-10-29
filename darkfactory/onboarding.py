@@ -309,6 +309,7 @@ class LoginFlow:
                         break
                     if time.monotonic() >= self._deadline:
                         self._status = "expired"
+                        self._buffer.clear()
                         self._stop()
                         break
                 ready, _, _ = select.select([self._master], [], [], 0.1)
@@ -323,6 +324,8 @@ class LoginFlow:
                         break
                     if len(self._buffer) + len(chunk) > MAX_OUTPUT:
                         self._status = "failed"
+                        # Cleared under the same lock: a reader that sees "failed" never sees the output.
+                        self._buffer.clear()
                         self._stop()
                         break
                     self._buffer.extend(chunk)
@@ -335,11 +338,13 @@ class LoginFlow:
                             self._status = "done"
                         else:
                             self._status = "failed"
+                        self._buffer.clear()
                         break
         except Exception:
             with self._lock:
                 self._status = "failed"
                 self._credentials = None
+                self._buffer.clear()
                 self._stop()
         finally:
             with self._lock:

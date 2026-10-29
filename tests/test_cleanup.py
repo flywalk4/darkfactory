@@ -33,6 +33,7 @@ def test_sweep_removes_old_finished_workspaces_and_merged_branches(
         session.get(db.Project, project["id"]).remote = str(remote)
     mirror = db.ROOT / "repositories" / (project["id"] + ".git")
     git(tmp_path, "clone", "-q", "--mirror", str(remote), str(mirror))
+    git(remote, "branch", "preprod", "main")
     git(remote, "branch", "darkfactory/old", "main")
     git(remote, "branch", "darkfactory/dropped", "main")
     merged, cancelled, fresh, waiting = (make_task(client, project)["id"] for _ in range(4))
@@ -365,6 +366,7 @@ def test_toolchain_images_build_with_buildkit_when_the_cli_is_present(monkeypatc
     toolchains._buildkit("darkfactory-toolchain:x", "FROM tools\n", {"go": "1"}, lambda: True)
     assert (tmp_path / "Dockerfile").read_text() == "FROM tools\n"
     assert (tmp_path / "args").read_text().startswith("buildx build --load")
-    (fake / "docker").write_text("#!/bin/sh\necho 'ERROR: failed to solve'\nexit 1\n")
+    # Reads the Dockerfile like the real CLI does, so the failure never races the stdin write.
+    (fake / "docker").write_text("#!/bin/sh\ncat > /dev/null\necho 'ERROR: failed to solve'\nexit 1\n")
     with pytest.raises(RuntimeError, match="failed to solve"):
         toolchains._buildkit("darkfactory-toolchain:x", "FROM tools\n", {}, lambda: True)

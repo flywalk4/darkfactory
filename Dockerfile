@@ -36,8 +36,12 @@ RUN PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000 node /tmp/install-browser.cjs 
     && rm /tmp/install-browser.cjs
 # Jira MCP (catalog "jira") in its own venv so its dependencies never meet the factory's.
 ARG MCP_ATLASSIAN_VERSION=0.23.1
+# The venv starts with the pip bundled in Python, which has no --resume-retries; PyPI drops connections
+# mid-download often enough to fail whole deploys.
 RUN python -m venv /opt/mcp-atlassian \
-    && /opt/mcp-atlassian/bin/pip install --no-cache-dir --timeout 120 mcp-atlassian==${MCP_ATLASSIAN_VERSION}
+    && /opt/mcp-atlassian/bin/pip install --no-cache-dir --timeout 120 --retries 10 pip==26.2.2 \
+    && /opt/mcp-atlassian/bin/pip install --no-cache-dir --timeout 120 --retries 10 --resume-retries 10 \
+        mcp-atlassian==${MCP_ATLASSIAN_VERSION}
 COPY --chmod=755 scripts/mcp-atlassian.sh /usr/local/bin/mcp-atlassian
 # Agent CLIs last: declared here, a new CLI version rebuilds only the layers below, never Chromium.
 # Models call apply_patch from the shell; codex answers to that name, so agents stop hunting for a patch tool.

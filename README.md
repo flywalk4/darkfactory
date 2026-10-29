@@ -169,7 +169,7 @@ If your personal Codex already works through a local subscription gateway, pass 
 python3 scripts/connect_personal_codex.py --base-url http://host.docker.internal:8787/v1 --model MODEL_NAME
 ```
 
-This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
+This mode accepts only local HTTP addresses and requires `DARKFACTORY_PERSONAL_MODE=1`. A Claude connection takes the same kind of gateway in its credentials (`"base_url": "http://host.docker.internal:18788/bili/http://127.0.0.1:8787"` for agent-stack's bili and headroom); its relay then forwards there instead of to the provider. On Linux a gateway that listens on loopback only is exposed to the containers by `scripts/systemd/darkfactory-gateway.service` (socat on the Docker bridge address); the agent-stack services must survive logout (`loginctl enable-linger`). The executor connects to the given gateway through a fixed tunnel and the existing allow-list of addresses; the container network stays `none`. This mode does not enable a paid API.
 
 ### Pools and engine selection
 
@@ -417,7 +417,7 @@ The incoming webhook works in two modes, chosen by its "Override Destination Cha
 - **Override off** (the Rocket.Chat default): leave the channel's recipient empty. Every message goes to the webhook's own channel, and thread answers carry only the thread ID (`tmid`). Rocket.Chat refuses any request with `roomId` or `channel` here (`overriding destination channel is disabled for this integration`), so with override off a recipient makes every delivery fail. Put the outgoing webhook in the same room as the incoming one, or answers land outside the thread.
 - **Override on**: the recipient picks where notifications go, and command answers name the room they came from (`roomId`) next to `tmid`. Use this mode when notifications go to a room other than the webhook's own.
 
-Delivery state is in the channel's outbox (`notification_deliveries`). A Director answer to a chat command counts as replied (`director_dialogues.origin_replied`) only after Rocket.Chat or Telegram accepted it; a refused answer stays unreplied with the provider's HTTP status in `last_error`. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar.
+Delivery state is in the channel's outbox (`notification_deliveries`). A Director answer to a chat command counts as replied (`director_dialogues.origin_replied`) only after Rocket.Chat or Telegram accepted it; a refused answer stays unreplied with the provider's HTTP status in `last_error`. Notifications arrive as Rocket.Chat markdown under the name Darkfactory; with a non-loopback `DARKFACTORY_PUBLIC_URL` set, the factory logo is their avatar; otherwise the `:factory:` emoji is.
 
 ### Merge notifications
 
@@ -427,14 +427,16 @@ For employees, set a factory address reachable by them through `DARKFACTORY_PUBL
 
 ### Promoting to main
 
-When a top-level task completes, the notification also contains a **"Merge to main / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current `main` (up to 100,000 characters, with a truncation mark). The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
+Promotion carries `preprod` into the project's seed branch ("Source branch" in the project settings, `seed_branch`, `main` by default); below, `main` means that branch. A project whose seed branch is `nolang` promotes into `nolang`, and its old `main` branch never changes. If the seed branch is missing on the remote, promotion fails with an error and does not create it.
+
+When a top-level task completes, the notification also contains a **"Merge to <seed branch> / reject"** link. This is a merge proposal inside the factory, available for local Git as well. It pins the accepted commit and shows the full diff against the current seed branch (up to 100,000 characters, with a truncation mark). If the seed branch moves between the preview and the merge, the merge is refused and the owner opens the proposal again. The owner can merge or reject it; the GET link changes nothing by itself. The transfer includes all `preprod` changes up to the specified commit, including subtasks. Rejection keeps `preprod`.
 
 > [!NOTE]
 > By default there is no automatic transfer to `main`, and the Director cannot make this decision; see [Automatic promotion](#automatic-promotion) for the opt-in. A GitLab project with a deploy job deploys after the owner's merge ([below](#stand-testing-and-gitlab-deploys)). If `main` has diverged from the accepted commit, integration and re-checks are needed first. Old completed tasks do not get new proposals automatically.
 
 ### Automatic promotion
 
-An owner can let a project promote itself: set **"Automatic promotion after a soak, hours"** (`auto_promote_hours`, `0` = only by hand) and add an **"Automatic promotion of preprod into main"** [schedule](#schedules). When the schedule fires, the newest accepted `preprod` goes to `main` only if:
+An owner can let a project promote itself: set **"Automatic promotion after a soak, hours"** (`auto_promote_hours`, `0` = only by hand) and add an **"Automatic promotion of preprod into <seed branch>"** [schedule](#schedules). When the schedule fires, the newest accepted `preprod` goes to the project's seed branch (`main` by default) only if:
 
 - it was accepted at least `auto_promote_hours` ago and no preprod incident happened since then;
 - the last preprod check is healthy and the usual promotion guards pass;
@@ -448,7 +450,7 @@ The promotion is recorded as the factory's decision on the task, and a GitLab de
 
 ### Syncing main back into preprod
 
-The reverse direction is automatic: on the project's **"Merge main into preprod"** [schedule](#schedules) (hourly by default; `DARKFACTORY_MAIN_SYNC_SECONDS=0` turns syncing off for the installation) the factory merges new `main` commits into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with `main`; otherwise a merge commit is created. On conflict, a task "Merge main into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
+The reverse direction is automatic: on the project's **"Merge <seed branch> into preprod"** [schedule](#schedules) (hourly by default; `DARKFACTORY_MAIN_SYNC_SECONDS=0` turns syncing off for the installation) the factory merges new commits of the project's seed branch (`main` by default) into `preprod`, for example the owner's hotfixes. If `preprod` has not moved ahead, it simply catches up with the seed branch; otherwise a merge commit is created. On conflict, a task "Merge <seed branch> into preprod: conflict" appears with the merge started and markers in the working folder; the agent resolves the conflict, after which the task goes through the regular review and checks.
 
 ## Limits and incidents
 
@@ -525,9 +527,20 @@ Each defect the agent reproduced twice becomes an ordinary fix task with the ste
 
 Notifications: `qa_reported` and `qa_not_fixed`. API: `POST /api/projects/{id}/qa` starts a run now. The run uses the project's writer pool and lasts at most `DARKFACTORY_QA_SECONDS` (1800); `DARKFACTORY_STAND_QA=0` turns stand testing off for the whole installation.
 
+### Stand builds
+
+For a platform that builds apps itself (a low-code platform with an assistant in its editor), a **"Build an app on the stand"** [schedule](#schedules) makes the tester a demanding customer. Each run takes the next request from the project's **"Build requests"** (`build_tasks`, one per line; empty = the factory's own set: leave requests, support tickets, doctor appointments, a shop with orders, an employee survey) and:
+
+1. signs in to the tester's own tenant and gives the request to the platform's builder word for word, following the owner's **"How to build an app on this platform"** (`build_instructions`);
+2. waits for the result, publishes or previews the app and uses it end to end in every role, at 390 and 1440 px;
+3. scores completeness, correctness, usability and visual quality 0–5 and records whether it built, how long it took, compile errors and failing tests;
+4. turns at most `build_max_tasks` problems (3 by default) into fix tasks of the platform project, each with the category of its root cause: `dsl`, `compiler`, `builder`, `components`, `studio`, `runtime` or `other`. A task asks to fix the platform, not the one generated app.
+
+The schedule row shows the last build and the share built and mean scores over the last ten runs; the last 60 runs are kept for week-by-week comparison. Builds and stand tests share one browser slot. `DARKFACTORY_BUILD_SECONDS` (3000) bounds a run.
+
 ### GitLab deploys
 
-For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in the `main` pipeline (for example `deploy`). A project with GitLab MRs uses the MR server and its token; a project without them uses the API beside its HTTPS Git URL (`https://host/api/v4`) and the Git token, so it keeps working without MRs. The token needs the `api` scope and the right to run that job, including a protected environment. After the owner merges into `main` (see [Promoting to main](#promoting-to-main)), the factory:
+For a GitLab project, set **"GitLab deploy job"** to the name of a manual job in the seed branch pipeline (`main` by default) (for example `deploy`). A project with GitLab MRs uses the MR server and its token; a project without them uses the API beside its HTTPS Git URL (`https://host/api/v4`) and the Git token, so it keeps working without MRs. The token needs the `api` scope and the right to run that job, including a protected environment. After the owner merges into the seed branch (see [Promoting to main](#promoting-to-main)), the factory:
 
 1. finds the pipeline of the new `main` commit;
 2. waits until the jobs of the `build` stage finish, so the images of the commit exist;
@@ -544,13 +557,24 @@ The **"Schedules"** page of a project lists its recurring jobs. Each schedule ha
 | Job | What a run does |
 |---|---|
 | Stand testing | asks the [stand tester](#stand-tester) for a run; skipped while 8 stand bugs are open |
+| Build an app on the stand | asks the tester for a [stand build](#stand-builds) |
 | Backlog into tasks | groups the open backlog notes into tasks; nothing happens without new notes |
-| Merge main into preprod | [syncs `main` into `preprod`](#syncing-main-back-into-preprod) |
+| Merge <seed branch> into preprod | [syncs the seed branch (`main` by default) into `preprod`](#syncing-main-back-into-preprod) |
+| Factory failure report (`self_report`) | queues a background scan of failures across the organization into the backlog of a project marked **This project is the factory** (`factory_self`) |
+| Project lessons | turns the collected [lessons](#project-lessons) into one task "Update project rules"; nothing happens without new cases, skipped while that task is open |
 | Task | creates an ordinary task with the saved title, request and priority; skipped while the task of the previous run is still open |
 
-A new project gets an hourly main sync and a backlog run every 4 hours; the stand tester schedule appears when a stand address is set. Projects connected earlier get the same schedules from their old interval settings once. After a factory outage the missed runs of a schedule collapse into one. `DARKFACTORY_TIMEZONE` sets the default time zone (UTC); the form offers the browser's.
+A new project gets an hourly main sync, a backlog run every 4 hours and a weekly lessons run (Mondays 06:00); the stand tester schedule appears when a stand address is set. Projects connected earlier get the same schedules from their old interval settings once, and the weekly lessons schedule once on the first factory start after the upgrade. After a factory outage the missed runs of a schedule collapse into one. `DARKFACTORY_TIMEZONE` sets the default time zone (UTC); the form offers the browser's.
+
+The factory report scans failures since its previous run: escalations, repeated reviews, environment and network blocks, stall restarts, execution errors, stand QA and deploy errors, worker background exceptions, and failed or rolled-back self-updates. It groups normalized reasons across projects, keeps occurrence counts, and creates a note after two occurrences (immediately for a failed or rolled-back self-update). Notes are scrubbed of addresses, tokens, the factory project’s `TEST_LEAK_PATTERNS`, and other project names. A fingerprint stays suppressed while its note or linked task is open. Projects without `factory_self` receive no reports. Worker errors are stored in a rotating `system/errors.jsonl` journal under the data root.
 
 API: `GET|POST /api/projects/{id}/schedules`, `PUT|DELETE /api/schedules/{id}`, `POST /api/schedules/{id}/run`.
+
+### Project lessons
+
+Mistakes agents stumbled on become short project rules. When a task merges into preprod after review returns (its first review findings are kept), a repeated review finding, a Director stop, or when it came from the stand tester, the factory keeps a short case in the project (the last 50). The **"Project lessons"** schedule (`lessons`, weekly by default) makes one task "Обновить правила проекта" listing the cases and then clears them; a second one is not created while the first is open. The agent extends and compacts `docs/darkfactory/LESSONS.md`: at most 60 lines, one rule per line ("do / don't — why"), duplicates and outdated rules removed. The task may change only that file: the writer's result and the merge are refused otherwise.
+
+The file is not inlined into prompts. Agents of the plan, writer and review stages get it as the `project-lessons` skill: the prompt carries only its name, a one-line description and the path, and the full text is written to the agent's skill directory.
 
 ## API and data
 

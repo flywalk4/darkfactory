@@ -120,7 +120,7 @@ PLAN_SCHEMA = {
                     "request": {"type": "string", "minLength": 1, "maxLength": 20000},
                     "acceptance": {"type": "string", "minLength": 1, "maxLength": 12000},
                     "agent_profile": {"type": ["string", "null"]},
-                    "tier": {"type": ["string", "null"], "enum": ["light", "standard", None]},
+                    "tier": {"type": ["string", "null"], "enum": ["light", "standard", "heavy", None]},
                     "files": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 300}},
                     "depends_on": {
                         "type": "array",
@@ -175,7 +175,7 @@ def plan_object(text, allow_subtasks=True):
             or not isinstance(subtask.get("files", []), list)
             or len(subtask.get("files", [])) > 20
             or not all(isinstance(path, str) and 0 < len(path) <= 300 for path in subtask.get("files", []))
-            or subtask.get("tier") not in (None, "light", "standard")
+            or subtask.get("tier") not in (None, "light", "standard", "heavy")
             or (
                 subtask.get("agent_profile") is not None
                 and (
@@ -882,7 +882,7 @@ class Followups:
         if (ask := self.coverage(output)) is not None:
             return ask
         evidence = os.environ.get("DARKFACTORY_EVIDENCE_DIR")
-        if evidence and Path(evidence, "owner-request.json").exists():
+        if evidence and (Path(evidence) / "owner-request.json").exists():
             # The writer stopped to ask the owner or to split the work; nothing is ready to check.
             return None
         if self.review:
@@ -1459,7 +1459,9 @@ def claude(job, upstream=None):
         args += ["--max-turns", turns]
     if job.get("output_schema") or job["role"] in {"review", "plan"}:
         schema = job.get("output_schema") or (REVIEW_SCHEMA if job["role"] == "review" else PLAN_SCHEMA)
-        args += ["--json-schema", json.dumps(schema), "--tools", "Read,Glob,Grep"]
+        # The stand tester reads its sign-in from the environment with a shell; its workspace is read-only.
+        tools = "Read,Glob,Grep,Bash" if job["role"] == "qa" else "Read,Glob,Grep"
+        args += ["--json-schema", json.dumps(schema), "--tools", tools]
     Path("/tmp/claude").mkdir(parents=True, exist_ok=True)
     hand_over("/tmp/claude")
     prompt, images = job["prompt"], job.get("images", [])

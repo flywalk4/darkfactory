@@ -414,16 +414,16 @@ def promotion_decision(task_id: str, value: PromotionInput, a=Depends(access)):
                 raise HTTPException(409, "По этому предложению уже принято решение")
             if value.action == "merge":
                 if not value.main_sha:
-                    raise HTTPException(400, "Сначала открой сравнение с текущей main")
+                    raise HTTPException(400, f"Сначала открой сравнение с текущей {current['target']}")
                 project = promotions.validate(db, task, current)
                 main_sha = Repository(project, task).promote_main(value.source_sha, value.main_sha)
             event(
                 db,
                 task,
                 "promotion_" + wanted,
-                "Владелец влил принятый коммит в main"
+                f"Владелец влил принятый коммит в {current['target']}"
                 if wanted == "merged"
-                else "Владелец отклонил перенос в main; preprod сохранена",
+                else f"Владелец отклонил перенос в {current['target']}; preprod сохранена",
                 proposal_id=current["id"],
                 commit=value.source_sha,
                 main_sha=value.main_sha,

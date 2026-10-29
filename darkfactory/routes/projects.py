@@ -105,6 +105,7 @@ class ProjectInput(BaseModel):
     ssh_known_hosts: str = ""
     executor_image: str | None = Field(default=None, max_length=250)
     allowed_hosts: list[str] | None = Field(default=None, max_length=50)
+    factory_self: bool = False
     allow_paid_fallback: bool = False
     package_registries: bool = True
     merge_without_checks: bool = True
@@ -121,12 +122,17 @@ class ProjectInput(BaseModel):
     qa_max_tasks: int = Field(default=standqa.MAX_TASKS, ge=1, le=10)
     qa_instructions: str | None = Field(default=None, max_length=8000)
     # GitLab only: the manual job the factory plays after the owner merges into main; empty turns deploys off.
+    # Stand builds: requests the tester gives the platform's app builder, how to reach it, problems per run.
+    build_tasks: list[str] | None = Field(default=None, max_length=50)
+    build_instructions: str | None = Field(default=None, max_length=8000)
+    build_max_tasks: int = Field(default=3, ge=1, le=10)
     # Hours an accepted preprod must hold before the factory promotes it to main on its own; 0 = owner only.
     auto_promote_hours: int = Field(default=0, ge=0, le=720)
     deploy_job: str | None = Field(default=None, max_length=255, pattern=r"^[^\n\r]*$")
 
 
 PROJECT_SECRETS = {
+    "factory_self",
     "allow_paid_fallback",
     "package_registries",
     "merge_without_checks",
@@ -149,6 +155,9 @@ PROJECT_SECRETS = {
     "qa_instructions",
     "deploy_job",
     "auto_promote_hours",
+    "build_tasks",
+    "build_instructions",
+    "build_max_tasks",
 }
 
 
@@ -159,7 +168,8 @@ def project_secrets(value, previous=None, *, initialize_agents=False):
     for key in PROJECT_SECRETS & value.model_fields_set:
         item = getattr(value, key)
         if item is not None and (
-            item != "" or key in {"executor_image", "stand_url", "qa_instructions", "deploy_job"}
+            item != ""
+            or key in {"executor_image", "stand_url", "qa_instructions", "deploy_job", "build_instructions"}
         ):
             result[key] = item
     return encrypt(json.dumps(result))

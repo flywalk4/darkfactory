@@ -10,6 +10,7 @@ import signal
 import subprocess
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 
 from sqlalchemy import func, select
 
@@ -21,11 +22,14 @@ from . import (
     disk,
     environment,
     initialization,
+    lessons,
     logs,
     mainsync,
     promotions,
     schedules,
+    selfreport,
     service,
+    standbuild,
     standqa,
     toolchains,
     usage,
@@ -162,6 +166,23 @@ def without_later(message):
         return json.dumps(review, ensure_ascii=False)
     except (ValueError, TypeError, AttributeError):
         return message
+
+
+def checks_mutation(repo, output=""):
+    """A failed result when the checks left tracked files changed: the writer needs the paths to fix it."""
+    changed = repo.git("diff", "--name-only", "HEAD", cwd=repo.work, check=False).stdout.split()
+    if not changed:
+        return None
+    text = "Required checks modified tracked source files:\n" + "\n".join(changed[:20])
+    if len(changed) > 20:
+        text += f"\n… and {len(changed) - 20} more"
+    text += (
+        "\n.git is read-only in the sandbox, so `git checkout` cannot restore them inside a check: "
+        "keep tests from writing tracked files, or copy them aside and back."
+    )
+    if output:
+        text += "\n\nCheck output:\n" + output[-2000:]
+    return {"status": "checks_failed", "text": text}
 
 
 def unbacked_claims(repo, claimed):
@@ -541,7 +562,8 @@ def accept_merge(db, task):
         # The merge fast-forwarded a checked preprod to a checked candidate: the new head is known healthy,
         # so the monitor does not re-run every check on it. The periodic full re-check keeps its schedule.
         project.health = {**health, "sha": task.result_sha}
-    # Factory bookkeeping (index, environment) rides to main with the next real change.
+    lessons.record(db, task, project)
+    # Factory bookkeeping (index, environment) rides to the seed branch with the next real change.
     root = (
         not task.system_check
         and not initialization.active(task)
@@ -552,7 +574,7 @@ def accept_merge(db, task):
         db,
         task,
         "accepted",
-        "Слито в preprod. Перенос в main — вручную в карточке задачи"
+        f"Слито в preprod. Перенос в {db.get(Project, task.project_id).seed_branch} — вручную в карточке задачи"
         if root
         else "Проверенный результат слит в preprod",
         commit=task.result_sha,
@@ -1000,11 +1022,7 @@ class Worker:
                     lambda: beat(),
                     max(1, task.execution_deadline - now()),
                 )
-                if repo.git("diff", "--quiet", "HEAD", cwd=repo.work, check=False).returncode:
-                    checked = {
-                        "status": "checks_failed",
-                        "text": "Required checks modified tracked source files",
-                    }
+                checked = checks_mutation(repo, checked.get("text", "")) or checked
                 (repo.artifacts / "checks.txt").write_text(checked.get("text", ""))
                 result.update(checked)
             elif phase == "collect":
@@ -1105,11 +1123,7 @@ class Worker:
                         result = self.executor.run(task, project, connection, role, lambda: beat(), remaining)
                 if phase in {"checks", "verify"}:
                     (repo.artifacts / "checks.txt").write_text(result.get("text", ""))
-                    if repo.git("diff", "--quiet", "HEAD", cwd=repo.work, check=False).returncode:
-                        result = {
-                            "status": "checks_failed",
-                            "text": "Required checks modified tracked source files",
-                        }
+                    result = checks_mutation(repo, result.get("text", "")) or result
                     if phase == "verify" and initialization.active(task) and result.get("status") == "ok":
                         try:
                             initialization.documents(repo, task.candidate_sha)
@@ -1119,6 +1133,9 @@ class Worker:
                     (repo.artifacts / "checks.txt").write_text(inner.get("text", ""))
                 # A writer that stopped to ask or to split leaves its workspace as it is.
                 if phase == "implement" and result.get("status") == "ok" and not result.get("request"):
+                    # Tidy first: run output left by a check run is not the writer's change, and counting it
+                    # against the "only this file" rules burns correction cycles the writer cannot fix.
+                    tidied = repo.tidy()
                     try:
                         if verify_guide.active(task):
                             verify_guide.validate(repo)
@@ -1126,6 +1143,8 @@ class Worker:
                             initialization.validate(repo)
                         if environment.active(task):
                             environment.validate(repo)
+                        if lessons.active(task):
+                            lessons.validate(repo)
                         if note := visual_gate(task):
                             if note[0] == "rework":
                                 raise ValueError(note[1])
@@ -1133,7 +1152,7 @@ class Worker:
                     except (ValueError, UnicodeError) as exc:
                         result = {"status": "checks_failed", "text": str(exc)}
                     else:
-                        if tidied := repo.tidy():
+                        if tidied:
                             listed = ", ".join(tidied[:10]) + (
                                 f" и ещё {len(tidied) - 10}" if len(tidied) > 10 else ""
                             )
@@ -1199,6 +1218,8 @@ class Worker:
                     raise RuntimeError("Acceptance evidence does not match the candidate commit")
                 if initialization.active(task) and not (task.role_config or {}).get("merge_approved"):
                     initialization.only_documents(repo, task.target_sha, task.candidate_sha)
+                if lessons.active(task):
+                    lessons.only_lessons(repo, task.target_sha, task.candidate_sha)
                 if task.dependency_commits:
                     # Accepted inputs are checked right before the merge. The push itself runs outside the
                     # transaction: it holds the global lock, and a slow remote would expire every lease.
@@ -1741,9 +1762,40 @@ def periodic(future, pool, job):
     re-raising it on every tick would keep the scheduler from ever reaching the claim."""
     if future is not None and not future.done():
         return future
-    if future is not None and (error := future.exception()) is not None:
+    if future is not None and not future.cancelled() and (error := future.exception()) is not None:
         log.error("Background job %s failed", job.__name__, exc_info=error)
     return pool.submit(job)
+
+
+class SystemErrorHandler(RotatingFileHandler):
+    """Bounded JSONL journal of failures of scheduler background jobs."""
+
+    def __init__(self):
+        path = ROOT / "system" / "errors.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(path, maxBytes=1024 * 1024, backupCount=3, encoding="utf-8")
+        self.setLevel(logging.ERROR)
+        self.addFilter(
+            lambda record: (
+                record.funcName == "periodic"
+                or record.getMessage()
+                in {
+                    "Scheduler tick failed",
+                    "Project schedules failed",
+                }
+            )
+        )
+
+    def format(self, record):
+        message = record.getMessage()
+        if record.exc_info:
+            message += "\n" + logging.Formatter().formatException(record.exc_info)
+        return json.dumps({"at": record.created, "message": message}, ensure_ascii=False)
+
+
+def test_stands():
+    """Stand tests and stand builds share one browser slot: a build waits for a running test and back."""
+    return standqa.run() or standbuild.run()
 
 
 def heartbeat():
@@ -1763,6 +1815,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     # httpx logs every request URL, and Telegram bot URLs carry the bot token.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    log.addHandler(SystemErrorHandler())
     initialize()
     if upgraded := agents.upgrade_projects():
         log.info("Upgraded default skills and profiles of %d projects", len(upgraded))
@@ -1788,6 +1841,7 @@ def main():
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as testers,
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as releases,
         concurrent.futures.ThreadPoolExecutor(max_workers=1) as promoting,
+        concurrent.futures.ThreadPoolExecutor(max_workers=1) as reporting,
     ):
         telegram = None
         grouping = None
@@ -1800,6 +1854,7 @@ def main():
         testing = None
         releasing = None
         promotion = None
+        report = None
         while not stopping.is_set():
             try:
                 futures = {f for f in futures if not f.done()}
@@ -1823,9 +1878,10 @@ def main():
                     grouping = periodic(grouping, backlogs, backlog.plan)
                 # A stand run takes up to half an hour; deploys only poll GitLab.
                 if standqa.enabled():
-                    testing = periodic(testing, testers, standqa.run)
+                    testing = periodic(testing, testers, test_stands)
                 releasing = periodic(releasing, releases, deploys.advance)
                 promotion = periodic(promotion, promoting, promotions.auto_promote)
+                report = periodic(report, reporting, selfreport.run)
                 heartbeat()
                 login = periodic(login, logins, advance_logins)
                 telegram = periodic(telegram, telegrams, listen_telegram)

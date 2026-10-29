@@ -58,6 +58,7 @@ def project_settings(row):
         return copy.deepcopy(cached[2])
     config = json.loads(decrypt(row.secret) or "{}")
     value = dict(
+        factory_self=config.get("factory_self", False),
         executor_image=config.get("executor_image"),
         allowed_hosts=config.get("allowed_hosts", []),
         allow_paid_fallback=config.get("allow_paid_fallback", False),
@@ -76,6 +77,9 @@ def project_settings(row):
         qa_instructions=config.get("qa_instructions", ""),
         deploy_job=config.get("deploy_job"),
         auto_promote_hours=config.get("auto_promote_hours", 0),
+        build_tasks=config.get("build_tasks") or [],
+        build_instructions=config.get("build_instructions", ""),
+        build_max_tasks=config.get("build_max_tasks", 3),
         environment={
             name: item
             for name, item in toolchains.state(row.id).items()

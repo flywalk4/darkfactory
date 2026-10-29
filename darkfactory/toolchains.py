@@ -690,7 +690,7 @@ def _buildkit(tag, text, spec, heartbeat):
             proc.stdin.write(text.encode())
             proc.stdin.close()
         except BrokenPipeError:
-            # The CLI exited before reading the Dockerfile: its exit code and log below tell why.
+            # docker exited before reading the Dockerfile; its exit code and log below tell why.
             pass
         started, code = time.monotonic(), None
         while code is None:

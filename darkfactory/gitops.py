@@ -18,6 +18,7 @@ import httpx
 
 from . import warm
 from .db import ROOT, decrypt
+from .deploys import gitlab_api
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,8 @@ EVIDENCE = re.compile(
 IMAGE = re.compile(r"\.(?:png|jpe?g|gif|webp|bmp)$", re.IGNORECASE)
 IMAGE_DIRS = {"assets", "shots", "design-refs", "public", "static", "images", "img", "icons", "res"}
 CACHE_DIRS = {".npm-cache", ".npm", "_cacache", "npm-cache"}
+# pytest falls back to `pytest-of-<user>/` in the working directory when /tmp is full.
+PYTEST_TMP = re.compile(r"(?:^|/)pytest-of-[^/]+/")
 # Code in a logs/ or evidence/ package (a log viewer, an evidence service) is source.
 OUTPUT_DIRS = {"logs", "evidence"}
 SOURCE = re.compile(r"\.(?:py|[cm]?[jt]sx?|cs|java|kt|go|rs|rb|php|vue|svelte|html|s?css|md)$", re.IGNORECASE)
@@ -73,6 +76,7 @@ def run_output(path):
     return bool(
         name.lower().endswith(".log")
         or CACHE_DIRS & dirs
+        or PYTEST_TMP.search(path)
         or (OUTPUT_DIRS & dirs and not SOURCE.search(name))
         or STATUS.search(name)
         or (IMAGE.search(name) and not IMAGE_DIRS & dirs)
@@ -257,12 +261,18 @@ class Repository:
             "rev-parse", "--verify", f"refs/heads/{self.project.target}", cwd=self.mirror, check=False
         )
         if target.returncode:
-            seed = self.git(
-                "rev-parse", "--verify", f"refs/heads/{self.project.seed_branch}", cwd=self.mirror
-            )
+            seed = self._seed_head()
             self.git("push", "origin", f"{seed}:refs/heads/{self.project.target}", cwd=self.mirror)
             self.git("fetch", "origin", "+refs/heads/*:refs/heads/*", cwd=self.mirror)
         return self.git("rev-parse", f"refs/heads/{self.project.target}", cwd=self.mirror)
+
+    def _seed_head(self):
+        """The project's seed branch in the mirror; promotion never creates it on the remote."""
+        branch = self.project.seed_branch
+        found = self.git("rev-parse", "--verify", f"refs/heads/{branch}", cwd=self.mirror, check=False)
+        if found.returncode:
+            raise GitError(f"Ветки {branch} нет в удалённом репозитории; проверь исходную ветку проекта")
+        return found.stdout.strip()
 
     def prepare(self):
         target = self.refresh()
@@ -484,7 +494,21 @@ class Repository:
         (self.artifacts / "diff.patch").write_text(diff + "\n")
 
     def publish(self, sha):
-        self.git("push", self.project.remote, f"{sha}:refs/heads/{self.task.branch}", cwd=self.work)
+        pushed = self.git(
+            "push", self.project.remote, f"{sha}:refs/heads/{self.task.branch}", cwd=self.work, check=False
+        )
+        if pushed.returncode:
+            head = self._remote_heads(self.task.branch, cwd=self.work)[0]
+            if (
+                head
+                and self.git("merge-base", "--is-ancestor", head, sha, cwd=self.work, check=False).returncode
+            ):
+                raise GitError(
+                    f"Ветку {self.task.branch} изменили вне фабрики: в ней есть коммиты {head[:12]}, которых "
+                    "нет в результате задачи. Фабрика её не перезаписывает; перенеси эти правки в main "
+                    "или preprod и удали ветку, либо удали ветку, если правки не нужны"
+                )
+            self.git("push", self.project.remote, f"{sha}:refs/heads/{self.task.branch}", cwd=self.work)
         if self.project.forge == "git":
             return f"/api/tasks/{self.task.id}"
         target = self.refresh()
@@ -529,7 +553,7 @@ class Repository:
                 response.raise_for_status()
                 return response.json()["html_url"]
             headers = {"PRIVATE-TOKEN": token}
-            endpoint = base + "/projects/" + quote(repo, safe="") + "/merge_requests"
+            endpoint = gitlab_api(base) + "/projects/" + quote(repo, safe="") + "/merge_requests"
             response = client.get(
                 endpoint,
                 headers=headers,
@@ -580,25 +604,64 @@ class Repository:
         self.drop_branch()
         return True
 
+    def _remote_heads(self, *branches, cwd):
+        """Current remote tips of the branches, their objects fetched into `cwd`; a missing branch is None."""
+        refs = [f"refs/heads/{branch}" for branch in branches]
+        listed = self.git("ls-remote", self.project.remote, *refs, cwd=cwd)
+        found = {ref: sha for sha, ref in (line.split("\t", 1) for line in listed.splitlines())}
+        heads = [found.get(ref) for ref in refs]
+        missing = [
+            ref
+            for ref, sha in zip(refs, heads)
+            if sha and self.git("cat-file", "-e", sha + "^{commit}", cwd=cwd, check=False).returncode
+        ]
+        if missing:
+            # By URL, not by remote name: the mirror's configured refspec would move its refs outside the lock.
+            self.git("fetch", "--no-tags", self.project.remote, *missing, cwd=cwd)
+        return heads
+
     def drop_branch(self):
-        """Merged work lives in preprod; the task branch is only noise in the remote. Best effort."""
+        """Merged work lives in preprod; the task branch is only noise in the remote. Best effort.
+
+        A person may have pushed to the task branch outside the factory: the branch is kept while its
+        remote tip has commits preprod does not, and the delete is leased to the tip that was checked."""
         branch = self.task.branch or ""
         if not branch.startswith("darkfactory/") or branch in {"preprod", "main", self.project.seed_branch}:
             return False
         cwd = self.mirror if self.mirror.is_dir() else self.work
-        result = self.git("push", self.project.remote, f":refs/heads/{branch}", cwd=cwd, check=False)
+        try:
+            head, target = self._remote_heads(branch, self.project.target, cwd=cwd)
+        except GitError:
+            log.warning("Could not inspect branch %s before dropping it", branch, exc_info=True)
+            return False
+        if head and (
+            not target
+            or self.git("merge-base", "--is-ancestor", head, target, cwd=cwd, check=False).returncode
+        ):
+            log.warning("Branch %s has commits outside %s; kept", branch, self.project.target)
+            return False
+        result = None
+        if head:
+            result = self.git(
+                "push",
+                f"--force-with-lease=refs/heads/{branch}:{head}",
+                self.project.remote,
+                f":refs/heads/{branch}",
+                cwd=cwd,
+                check=False,
+            )
         if self.mirror.is_dir():
             self.git("update-ref", "-d", f"refs/heads/{branch}", cwd=self.mirror, check=False)
-        return result.returncode == 0
+        return result is None or result.returncode == 0
 
     def main_preview(self, sha):
-        """Inspect a frozen, already accepted commit; never move a branch on preview."""
+        """Inspect a frozen, already accepted commit against the seed branch; never move a branch on preview."""
         with self._mirror_lock():
             self._refresh_locked()
             return self._main_preview_locked(sha)
 
     def _main_preview_locked(self, sha):
-        main = self.git("rev-parse", "--verify", "refs/heads/main", cwd=self.mirror)
+        main = self._seed_head()
         self.git("cat-file", "-e", sha + "^{commit}", cwd=self.mirror)
         fast_forward = not self.git(
             "merge-base", "--is-ancestor", main, sha, cwd=self.mirror, check=False
@@ -693,7 +756,10 @@ class Repository:
         result = self.git("merge", "--no-edit", "--no-ff", sha, cwd=self.work, check=False)
         self.own_files()
         if result.returncode and not self._pending_merge():
-            raise GitError("Слияние main в preprod не началось: " + (result.stderr or result.stdout)[-500:])
+            raise GitError(
+                f"Слияние {self.project.seed_branch} в preprod не началось: "
+                + (result.stderr or result.stdout)[-500:]
+            )
         return self._conflict_guidance()
 
     def promote_main(self, sha, expected_main):
@@ -703,10 +769,11 @@ class Repository:
             preview = self._main_preview_locked(sha)
             if preview["already_merged"]:
                 return preview["main_sha"]
+            branch = self.project.seed_branch
             if preview["main_sha"] != expected_main:
-                raise GitError("Ветка main изменилась; заново открой предложение слияния")
+                raise GitError(f"Ветка {branch} изменилась; заново открой предложение слияния")
             if not preview["can_merge"]:
-                raise GitError("Конфликт main и preprod: " + ", ".join(preview["conflicts"][:10]))
+                raise GitError(f"Конфликт {branch} и preprod: " + ", ".join(preview["conflicts"][:10]))
             target = sha
             if preview["mode"] == "merge":
                 target = self.git(
@@ -717,14 +784,14 @@ class Repository:
                     "-p",
                     sha,
                     "-m",
-                    f"Merge preprod {sha[:12]} into main",
+                    f"Merge preprod {sha[:12]} into {branch}",
                     cwd=self.mirror,
                 )
             self.git(
                 "push",
-                f"--force-with-lease=refs/heads/main:{expected_main}",
+                f"--force-with-lease=refs/heads/{branch}:{expected_main}",
                 "origin",
-                f"{target}:refs/heads/main",
+                f"{target}:refs/heads/{branch}",
                 cwd=self.mirror,
             )
             return target
