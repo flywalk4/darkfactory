@@ -728,3 +728,130 @@ def test_translation_and_changelog_files_do_not_serialise_tasks():
         assert SHARED_FILE.search(path), path
     for path in ("src/app/Documents.cs", "docs/i18n.md", "src/i18n.ts", "package.json"):
         assert not SHARED_FILE.search(path), path
+
+
+class ShotsExecutor(DeterministicExecutor):
+    """Writes a screenshot into the run evidence on the given implement call (1-based); never when None."""
+
+    PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    def __init__(self, shot_on=None, touch="value.py"):
+        super().__init__()
+        self.shot_on, self.touch = shot_on, touch
+
+    def run(self, task, project, connection, role, heartbeat, timeout):
+        result = super().run(task, project, connection, role, heartbeat, timeout)
+        if role == "implement":
+            count = [r for r, _ in self.calls].count("implement")
+            work = db.ROOT / "workspaces" / task.id
+            (work / self.touch).parent.mkdir(parents=True, exist_ok=True)
+            (work / self.touch).write_text("VALUE = 42\n" if self.touch == "value.py" else "// ok\n")
+            run = db.ROOT / "artifacts" / task.id / "browser" / f"run{count}"
+            run.mkdir(parents=True, exist_ok=True)
+            (run / "execution.json").write_text(json.dumps({"role": "implement"}))
+            if self.shot_on == count:
+                (run / "panel-390.png").write_bytes(self.PNG)
+        return result
+
+
+def run_task(client, setup_project, tmp_path, executor, **fields):
+    project, pool = setup_project
+    remote = seed(tmp_path)
+    connect(client, pool)
+    with db.transaction() as session:
+        current = session.get(db.Project, project["id"])
+        current.remote, current.checks = str(remote), []
+    task = make_task(client, project, quick=True, **fields)
+    done = drive(Worker(executor), task["id"])
+    with db.Session() as session:
+        kinds = [e.kind for e in session.scalars(select(db.Event).where(db.Event.task_id == task["id"]))]
+    return done, kinds
+
+
+def test_visual_task_without_screenshots_is_returned_once_then_flagged(client, setup_project, tmp_path):
+    executor = ShotsExecutor()
+    done, kinds = run_task(client, setup_project, tmp_path, executor, visual=True)
+    assert [role for role, _ in executor.calls].count("implement") == 2
+    assert kinds.count("correction") == 1 and "visual_unverified" in kinds
+    assert done.state == "merged"
+
+
+def test_visual_task_with_screenshots_is_not_returned(client, setup_project, tmp_path):
+    executor = ShotsExecutor(shot_on=1)
+    done, kinds = run_task(client, setup_project, tmp_path, executor, visual=True)
+    assert [role for role, _ in executor.calls].count("implement") == 1
+    assert "correction" not in kinds and "visual_unverified" not in kinds
+
+
+def test_plain_frontend_change_needs_no_screenshots(client, setup_project, tmp_path):
+    executor = ShotsExecutor(touch="frontend/app.js")
+    done, kinds = run_task(client, setup_project, tmp_path, executor)
+    assert [role for role, _ in executor.calls].count("implement") == 1
+    assert "correction" not in kinds and "visual_unverified" not in kinds
+    assert done.state == "merged"
+
+
+def test_stand_tester_report_with_screenshots_is_visual(client, setup_project):
+    from darkfactory import attachments, verify_guide
+
+    project, _ = setup_project
+    task = make_task(client, project)
+    with db.Session() as session:
+        row = session.get(db.Task, task["id"])
+        assert not verify_guide.visual(row)
+        row.role_config = {"qa": {"stand": "https://stand"}}
+        assert not verify_guide.visual(row)
+        folder = attachments.directory(row.id)
+        folder.mkdir(parents=True)
+        (folder / "01-qa-error.png").write_bytes(ShotsExecutor.PNG)
+        assert verify_guide.visual(row)
+
+
+def test_verify_guide_task_is_queued_once_and_limited_to_its_file(client, setup_project, tmp_path):
+    project, _ = setup_project
+    first = client.post(f"/api/projects/{project['id']}/verify-guide")
+    assert first.status_code == 200
+    assert client.post(f"/api/projects/{project['id']}/verify-guide").json()["id"] == first.json()["id"]
+    from darkfactory import verify_guide
+
+    repo = tmp_path / "work"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    (repo / "a.txt").write_text("x")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "seed")
+
+    class Repo:
+        work = repo
+
+        @staticmethod
+        def git(*args, cwd=None, check=True):
+            return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True).stdout
+
+    with pytest.raises(ValueError, match="не создан"):
+        verify_guide.validate(Repo)
+    (repo / "docs/darkfactory").mkdir(parents=True)
+    (repo / verify_guide.PATH).write_text("# Проверка\n")
+    verify_guide.validate(Repo)
+    (repo / "a.txt").write_text("changed")
+    with pytest.raises(ValueError, match="только"):
+        verify_guide.validate(Repo)
+
+
+def test_project_verify_skill_comes_from_the_latest_artifact_version(client, setup_project):
+    from darkfactory import verify_guide
+
+    project, _ = setup_project
+    assert verify_guide.project_verify(project["id"]) is None
+    with db.transaction() as session:
+        artifact = db.Artifact(project_id=project["id"], key=verify_guide.KEY, title="t", kind="document")
+        session.add(artifact)
+        session.flush()
+        author = session.scalar(select(db.Principal.id))
+        session.add(
+            db.ArtifactVersion(
+                artifact_id=artifact.id, number=1, content="Ширины 390 и 1440", created_by=author
+            )
+        )
+    skill = verify_guide.project_verify(project["id"])
+    assert skill["name"] == "project-verify" and "1440" in skill["content"]

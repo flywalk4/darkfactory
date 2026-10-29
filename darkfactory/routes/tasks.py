@@ -60,6 +60,7 @@ class TaskInput(BaseModel):
     explicit_api: bool = False
     # Small, fully described change: skip the planning run and write right away.
     quick: bool = False
+    visual: bool = False
     # Large work: a planner first, which may split it into subtasks. Default is one writer.
     plan: bool = False
     api_budget_usd: float = Field(default=0, ge=0, le=1000, allow_inf_nan=False)
@@ -99,12 +100,14 @@ def new_task(db, project, value, incident=False, author=None):
                 "artifact_version_ids",
                 "attachments",
                 "quick",
+                "visual",
                 "plan",
             }
         ),
         role_config={
             **({"profiles": value.agent_profiles} if value.agent_profiles else {}),
             **({"quick": True} if value.quick else {}),
+            **({"visual": True} if value.visual else {}),
             **({"plan": True} if value.plan and not value.quick else {}),
             **{
                 key: provider

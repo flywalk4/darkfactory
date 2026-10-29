@@ -241,7 +241,7 @@ def main_files(monkeypatch, tmp_path, job):
         "/run/task-lock/generation": generation,
         "/run/job/egress.sock": tmp_path / "no-egress.sock",
     }
-    monkeypatch.setattr(runner, "Path", lambda value: paths.get(str(value), Path(value)))
+    monkeypatch.setattr(runner, "Path", lambda value, *rest: paths.get(str(value), Path(value, *rest)))
     monkeypatch.setattr(runner, "open", lambda *_args, **_kwargs: lock.open("rb"), raising=False)
     monkeypatch.setattr(runner.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(runner.signal, "setitimer", lambda *_args: None)

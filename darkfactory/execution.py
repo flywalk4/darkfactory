@@ -15,7 +15,17 @@ import docker
 from docker.types import Mount
 from sqlalchemy import select
 
-from . import agents, attachments, environment, initialization, jira, logs, mirrors, toolchains
+from . import (
+    agents,
+    attachments,
+    environment,
+    initialization,
+    jira,
+    logs,
+    mirrors,
+    toolchains,
+    verify_guide,
+)
 from .db import ROOT, Event, Link, Pool, Session, Task, decrypt, event, transaction, uid
 from .egress import PACKAGE_REGISTRIES, TELEMETRY_SUFFIXES, egress_proxy
 
@@ -230,6 +240,7 @@ def splittable(project_config, task):
         agents.delegation_allowed(project_config, task)
         and not initialization.active(task)
         and not environment.active(task)
+        and not verify_guide.active(task)
     )
 
 
@@ -553,6 +564,8 @@ class DockerExecutor:
 
             if guide := project_guide(project.id):
                 profile = {**profile, "skill_definitions": [*profile["skill_definitions"], guide]}
+            if verify := verify_guide.project_verify(project.id):
+                profile = {**profile, "skill_definitions": [*profile["skill_definitions"], verify]}
         if role == "qa":
             from .standqa import profile as tester
 

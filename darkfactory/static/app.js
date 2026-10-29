@@ -214,6 +214,7 @@ async function taskForm(incident=false) {
     field('title',tr('Что нужно сделать?'))+
     field('priority',tr('Приоритет'),{type:'select',choices:taskPriorities,value:'normal'})+
     (incident?'':field('scope',tr('Объём'),{type:'select',choices:[['',tr('Обычная задача — сразу в разработку')],['plan',tr('Большая задача — сначала план и подзадачи')]],required:false}))+
+    field('visual',tr('Визуальная задача'),{type:'select',choices:[['',tr('Нет')],['true',tr('Да — приложить скриншоты')]],required:false})+
     field('request',tr('Описание и критерии приёмки'),{type:'textarea',placeholder:tr('Что происходит сейчас? Как должно работать? Как проверить результат?')})+attachField()+
     (artifactChoices.length?field('artifact_version_ids',tr('Входные артефакты — принятые версии'),{type:'multiselect',choices:artifactChoices,value:[],required:false}):'')+
     field('execution',tr('Режим выполнения'),{type:'select',choices:[['subscriptions',tr('Подписки и правила проекта')],['api',tr('Платный API для всех ролей')]]})+
@@ -226,6 +227,7 @@ async function taskForm(incident=false) {
       values.agent_profiles=Object.fromEntries(taskStages().filter(([key])=>values['profile_'+key]).map(([key])=>[key,values['profile_'+key]]));
       taskStages().forEach(([key])=>delete values['profile_'+key]);
       values.explicit_api=values.execution==='api';delete values.execution;values.plan=values.scope==='plan';delete values.scope;
+      values.visual=values.visual==='true';
       values.api_budget_usd=Number(values.api_budget_usd);
       for(const key of ['writer','reviewer']) if(!values[key]) delete values[key];
       const project=projects.find(p=>p.id===projectId);

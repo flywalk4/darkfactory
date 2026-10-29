@@ -258,6 +258,12 @@ The task uses the project's connections, limits, checks and independent review. 
 
 For a project connected earlier, open **"Project artifacts" → "Index project"**. The button is available to the owner and opens the existing initialization task if it was already created, without duplicates. Project creation through the API accepts `initialize` (default `true`); `false` disables the automatic start. For an existing project: `POST /api/projects/{id}/initialize`.
 
+### Visual check
+
+Tick **"Visual task"** in the new-task form (`role_config.visual`, API field `visual`) when the change is about appearance. Only such tasks must attach screenshots: after the writer finishes, a visual task with no screenshots in its run evidence (`/run/evidence`) goes back once with "attach screenshots per `project-verify`"; a second miss is only noted for the review and does not stop the task. A stand-tester task (`role_config.qa`) with `*-qa-*` screenshot attachments counts as visual too. All other tasks, including frontend edits, need no screenshots.
+
+The `project-verify` skill carries the text of `docs/darkfactory/VERIFY.md` (how to start the app in the container, widths 390 and 1440, what to capture, save to `/run/evidence`); the prompt holds only its name line. To write the document, open **"Project artifacts" → "Describe visual check"** (owner) or call `POST /api/projects/{id}/verify-guide`: a one-off task that may change only `docs/darkfactory/VERIFY.md`. After review the text becomes the `project-verify` artifact and skill.
+
 ## Project artifacts
 
 Open **"Project artifacts"** and add requirements, analytics, architecture, an API contract, a report or any other text document. An artifact has a stable key within the project, a title and a history of immutable versions. Content is stored in the DB; editing creates a new version. This is a separate project knowledge registry that complements the task working files (`plan.md`, `diff.patch`, `checks.txt`, `review.txt`, `handoff.md`) and browser evidence.

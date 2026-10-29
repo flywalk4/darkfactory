@@ -23,6 +23,7 @@ from .. import (
     service,
     standqa,
     toolchains,
+    verify_guide,
 )
 from ..db import (
     ROOT,
@@ -501,6 +502,14 @@ def initialize_project(project_id: str, a=Depends(access)):
     with transaction() as db:
         project = a.project(db, project_id)
         return public(initialization.queue(db, project, a.principal.id))
+
+
+@router.post("/api/projects/{project_id}/verify-guide")
+def describe_verification(project_id: str, a=Depends(access)):
+    a.require("owner")
+    with transaction() as db:
+        project = a.project(db, project_id)
+        return public(verify_guide.queue(db, project, a.principal.id))
 
 
 @router.get("/api/projects/{project_id}/agents")

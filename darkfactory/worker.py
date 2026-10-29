@@ -29,6 +29,7 @@ from . import (
     standqa,
     toolchains,
     usage,
+    verify_guide,
 )
 from .auth_sessions import advance_logins
 from .chat_commands import exchange
@@ -51,7 +52,16 @@ from .db import (
 )
 from .director import advance_dialogues
 from .director_stops import awaits_director, handle_stop, latest_transcript
-from .execution import LATER_PREFIX, DockerExecutor, Stalled, Stopped, controller_lock, write_handoff
+from .execution import (
+    LATER_PREFIX,
+    DockerExecutor,
+    Stalled,
+    Stopped,
+    controller_lock,
+    implementation_evidence,
+    screenshots,
+    write_handoff,
+)
 from .gitops import GitError, Repository
 from .notifications import completion_summary
 from .telegram_bot import listen as listen_telegram
@@ -1110,10 +1120,16 @@ class Worker:
                 # A writer that stopped to ask or to split leaves its workspace as it is.
                 if phase == "implement" and result.get("status") == "ok" and not result.get("request"):
                     try:
+                        if verify_guide.active(task):
+                            verify_guide.validate(repo)
                         if initialization.active(task):
                             initialization.validate(repo)
                         if environment.active(task):
                             environment.validate(repo)
+                        if note := visual_gate(task):
+                            if note[0] == "rework":
+                                raise ValueError(note[1])
+                            result["text"] = result.get("text", "") + "\n\n[darkfactory] " + note[1]
                     except (ValueError, UnicodeError) as exc:
                         result = {"status": "checks_failed", "text": str(exc)}
                     else:
@@ -1534,6 +1550,7 @@ class Worker:
                     # Review reads only the frozen candidate: other tasks may integrate meanwhile.
                     project.integration_task = None
                 initialization.publish(db, current, repo)
+                verify_guide.publish(db, current, repo)
                 environment.adopt(db, current, project, repo)
                 if current.state == "merged":
                     if project.incident_id == current.id:
@@ -1702,6 +1719,21 @@ def should_locate(task, connection):
         and not environment.active(task)
         and not (ROOT / "artifacts" / task.id / LOCATE_FILE).exists()
     )
+
+
+def visual_gate(task):
+    """A visual task needs screenshots in its run evidence. The first miss goes back to the writer once; the
+    second is passed on to the review as a note. Other tasks are not asked for screenshots."""
+    if not verify_guide.visual(task) or screenshots(implementation_evidence(task.id)):
+        return None
+    with transaction() as db:
+        current = db.get(Task, task.id)
+        config = current.role_config or {}
+        if not config.get("visual_rework"):
+            current.role_config = {**config, "visual_rework": True}
+            return "rework", verify_guide.REWORK
+        event(db, current, "visual_unverified", verify_guide.NOTE)
+    return "flag", verify_guide.NOTE
 
 
 def periodic(future, pool, job):
